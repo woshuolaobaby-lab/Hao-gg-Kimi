@@ -228,7 +228,12 @@
   </div>
 
   <div class="panel" style="margin-bottom:14px">
-    <h3>🔥 连涨信号<small>净值连续上涨≥3天(交易日)的基金 · 第4天继续涨会自动叠成"连涨4天"，以此类推 · 按连涨天数排序 · 连涨≠追涨信号，高位连涨要防回撤</small></h3>
+    <h3>🎯 预埋预判 · 准确率累计<small>预判"即将金叉/死叉"后，下一个交易日自动验证是否兑现，逐次累计 · 数据只存在你自己浏览器 · 存满1个月后点底部按钮导出，发给Kimi复盘检查</small></h3>
+    <div id="predStatGrid"><span style="color:#8b949e">加载中…</span></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px">
+    <h3>🔥 连涨信号<small>净值连续上涨≥2天(交易日)的基金 · 第3天继续涨会自动叠成"连涨3天"，以此类推 · 按连涨天数排序 · 连涨≠追涨信号，高位连涨要防回撤</small></h3>
     <div id="streakGrid"><span style="color:#8b949e">加载中…</span></div>
   </div>
 
@@ -450,10 +455,11 @@ function loadPred(){
         Object.keys(d.记录).forEach(k=>{ if(!d.记录[k].数据日期) delete d.记录[k]; });
         d._fix20260726 = true;
       }
+      if(!d.明细) d.明细 = []; /* 每次验证的流水：{date,code,name,预判,结果,发出} */
       return d;
     }
   }catch(e){}
-  return {记录:{}, 统计:{"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}}, _fix20260726:true};
+  return {记录:{}, 统计:{"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}}, 明细:[], _fix20260726:true};
 }
 function savePred(d){ localStorage.setItem(PRED_KEY, JSON.stringify(d)); }
 /* 数据是否推进到了下一个交易日（周末/节假日净值不更新，跳过验证，避免误判） */
@@ -535,6 +541,9 @@ function analyzeFund(code, vals, ts, predData, marketFactor, profile){
     if(hit){ st.正确++; 验证结果 = `预判正确(${key==="即将金叉"?"金叉":"死叉"}已确认)`; }
     else { st.失误++; 验证结果 = `预判失误(未形成${key==="即将金叉"?"金叉":"死叉"})`; }
     预判准确率 = `${key}准确率 ${(st.正确/st.总计*100).toFixed(0)}%(${st.正确}/${st.总计})`;
+    predData.明细 = predData.明细 || [];
+    predData.明细.push({date:todayStr, code, name:profile.name, 预判:key, 结果:hit?"正确":"失误", 发出:rec.date});
+    if(predData.明细.length>400) predData.明细 = predData.明细.slice(-400);
     delete predData.记录[code];
   }
   if(预判金叉) predData.记录[code] = {date:todayStr, 预判:"即将金叉", 均线差:均线差, 数据日期:数据日期};
@@ -951,7 +960,7 @@ function renderSigTrack(){
   g.innerHTML = (chips || `<span style="color:#8b949e">信号档案已累积 ${dates.length} 天，最早一批满5天后开始显示胜率。</span>`) + (rows ? `<div style="margin-top:6px">${rows}</div>` : "");
 }
 
-/* ======== 连涨信号：净值连续上涨≥3天（第4天续涨自动叠成连涨4天，以此类推） ======== */
+/* ======== 连涨信号：净值连续上涨≥2天（第3天续涨自动叠成连涨3天，以此类推） ======== */
 function renderStreak(){
   const g = $("streakGrid"); if(!g) return;
   const list = [];
@@ -962,20 +971,65 @@ function renderStreak(){
     for(let i=v.length-1; i>=1; i--){
       if(v[i] > v[i-1]) streak++; else break;
     }
-    if(streak>=3){
+    if(streak>=2){
       const cum = (v[v.length-1]/v[v.length-1-streak]-1)*100;
       list.push({code:r.代码, name:r.名称, streak, cum:+cum.toFixed(2), today:r.涨跌, 建议:r.建议, 估值显示:r.估值显示});
     }
   });
-  if(!list.length){ g.innerHTML = `<span style="color:#8b949e">今天没有连涨3天及以上的基金</span>`; return; }
+  if(!list.length){ g.innerHTML = `<span style="color:#8b949e">今天没有连涨2天及以上的基金</span>`; return; }
   list.sort((a,b)=> b.streak-a.streak || b.cum-a.cum);
   g.innerHTML = `<div class="env-grid">` + list.slice(0,24).map(s=>{
-    const hot = s.streak>=6 ? "#f85149" : s.streak>=4 ? "#ff7b72" : "#ffa657";
+    const hot = s.streak>=6 ? "#f85149" : s.streak>=4 ? "#ff7b72" : s.streak===3 ? "#ffa657" : "#e3b341";
     const warn = s.估值显示>=85 ? `<div style="font-size:11px;color:#f85149;margin-top:3px">⚠ 估值极高（分位${s.估值显示}%），连涨越多越要防回撤</div>` : (s.估值显示>=70 ? `<div style="font-size:11px;color:#e3b341;margin-top:3px">估值偏高（分位${s.估值显示}%），不建议追高</div>` : "");
     return `<div class="env-idx"><div class="nm">${s.name}<span class="mq-sub">${s.code}</span></div>
       <div class="tr" style="color:${hot}">🔥 连涨${s.streak}天<span style="font-weight:400;font-size:12px;color:#8b949e;margin-left:5px">${s.streak}日累计 +${s.cum}%</span></div>
       <div style="font-size:12px;color:#8b949e;margin-top:4px">今日 ${s.today>0?"+":""}${s.today}% · 信号:${s.建议}</div>${warn}</div>`;
-  }).join("") + `</div>` + (list.length>24 ? `<div style="font-size:12px;color:#8b949e;margin-top:6px">共 ${list.length} 只连涨≥3天，只显示前24只（按连涨天数排序）</div>` : "");
+  }).join("") + `</div>` + (list.length>24 ? `<div style="font-size:12px;color:#8b949e;margin-top:6px">共 ${list.length} 只连涨≥2天，只显示前24只（按连涨天数排序）</div>` : "");
+}
+
+/* ======== 预埋预判准确率面板：累计统计 + 近10次验证明细 + 导出 ======== */
+function renderPredStat(){
+  const g = $("predStatGrid"); if(!g) return;
+  const st = PRED.统计 || {};
+  const chip = key=>{
+    const s = st[key] || {正确:0,失误:0,总计:0};
+    if(!s.总计) return `<div class="sigt-chip"><b>${key}</b><br><span style="color:#8b949e">暂无验证记录</span></div>`;
+    const acc = s.正确/s.总计*100;
+    const color = acc>=60 ? "#3fb950" : acc>=40 ? "#e3b341" : "#f85149";
+    return `<div class="sigt-chip"><b>${key}</b><br>验证 ${s.总计} 次 · 准确率 <b style="color:${color}">${acc.toFixed(0)}%</b><br><span style="color:#8b949e">正确 ${s.正确} · 失误 ${s.失误}</span></div>`;
+  };
+  const pending = Object.keys(PRED.记录||{}).length;
+  const detail = (PRED.明细||[]).slice(-10).reverse().map(d=>
+    `<div class="news-item"><span class="news-time">${d.date.slice(5)}</span><span style="flex:1;color:#c9d1d9">${d.name||d.code} <span style="color:#8b949e">${d.预判}（${d.发出?d.发出.slice(5)+"发出":""}）</span></span><span style="color:${d.结果==="正确"?"#3fb950":"#f85149"};font-size:12px">${d.结果==="正确"?"✓ 兑现":"✗ 未兑现"}</span></div>`).join("");
+  g.innerHTML = `<div style="margin-bottom:6px">${chip("即将金叉")}${chip("即将死叉")}<div class="sigt-chip"><b>待验证</b><br><span style="color:#e3b341">${pending} 只</span><br><span style="color:#8b949e">已发出预判，等下个交易日</span></div></div>`
+    + (detail || `<span style="color:#8b949e">验证明细会从第一次兑现/失误开始累计。</span>`)
+    + `<div style="margin-top:10px"><button class="btn" style="padding:5px 14px;font-size:12px" onclick="exportStats()">📥 导出信号+预埋数据（发给Kimi检查）</button> <button class="btn" style="padding:5px 14px;font-size:12px;background:#1f6feb" onclick="exportFundList()">📥 导出基金清单</button></div>`;
+}
+
+/* 导出工具：生成txt文件下载 */
+function downloadTxt(fname, txt){
+  const blob = new Blob(["\ufeff"+txt], {type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+function exportStats(){
+  const sig = localStorage.getItem("fund_sig_log_v1")||"{}";
+  const pred = localStorage.getItem("fund_prediction_log")||"{}";
+  const txt = "基金监控面板 · 统计数据导出（发给Kimi复盘用）\n导出时间: "+new Date().toLocaleString()+"\n\n===== 一、买卖信号档案（signal追踪·胜率回看）=====\n"+sig+"\n\n===== 二、预埋预判统计（含每次验证明细）=====\n"+pred+"\n";
+  downloadTxt("面板统计数据-"+todayStr()+".txt", txt);
+}
+function exportFundList(){
+  let txt = "基金监控面板 · 全部基金清单（共"+FUNDS.length+"只）\n导出时间: "+new Date().toLocaleString()+"\n\n";
+  const bySec = {};
+  FUNDS.forEach(f=>{ (bySec[f.sector]=bySec[f.sector]||[]).push(f); });
+  Object.keys(bySec).forEach(sec=>{
+    txt += "【"+sec+"】\n";
+    bySec[sec].forEach(f=>{ txt += f.code+"  "+f.name+"（"+(f.long||"谨慎")+"）\n"; });
+    txt += "\n";
+  });
+  downloadTxt("基金清单-"+todayStr()+".txt", txt);
 }
 
 /* ======== 第二层：指数估值（真实PE/PB历史分位，数据源：蛋卷基金） ======== */
