@@ -461,7 +461,17 @@ function loadPred(){
   }catch(e){}
   return {记录:{}, 统计:{"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}}, 明细:[], _fix20260726:true};
 }
-function savePred(d){ localStorage.setItem(PRED_KEY, JSON.stringify(d)); }
+/* localStorage 安全写入：浏览器存储满了就删掉最旧的信号档案再试一次；还失败就放弃（不影响页面渲染） */
+let STORE_FULL = false;
+function safeSet(key, val){
+  try{ localStorage.setItem(key, val); return true; }catch(e){}
+  try{
+    const ks = Object.keys(SIG_LOG||{}).sort();
+    if(ks.length>90){ ks.slice(0, ks.length-90).forEach(k=>delete SIG_LOG[k]); localStorage.setItem("fund_sig_log_v1", JSON.stringify(SIG_LOG)); }
+    localStorage.setItem(key, val); return true;
+  }catch(e){ STORE_FULL = true; return false; }
+}
+function savePred(d){ safeSet(PRED_KEY, JSON.stringify(d)); }
 /* 数据是否推进到了下一个交易日（周末/节假日净值不更新，跳过验证，避免误判） */
 function dataHasAdvanced(rec, 当前数据日期){
   if(!rec.数据日期) return true; /* 旧记录没有数据日期，按原逻辑验证 */
@@ -923,7 +933,7 @@ function trackSignals(){
     if(snap.length) SIG_LOG[todayStr()] = snap;
     const keys = Object.keys(SIG_LOG).sort();
     while(keys.length>130){ delete SIG_LOG[keys.shift()]; } /* 只留最近约4个月 */
-    localStorage.setItem("fund_sig_log_v1", JSON.stringify(SIG_LOG));
+    safeSet("fund_sig_log_v1", JSON.stringify(SIG_LOG));
   }catch(e){}
 }
 function renderSigTrack(){
@@ -1817,7 +1827,9 @@ window.showSector = function(sector){
 "use strict";
 /* ================= 主流程 ================= */
 function renderAll(){
-  renderCards(); renderMatrix(); renderSector(); renderTopList(); renderTable(); renderEnv(); renderVal(); renderETF(); renderRadar(); renderHoldings(); renderSigTrack(); renderStreak();
+  [renderCards, renderMatrix, renderSector, renderTopList, renderTable, renderEnv, renderVal, renderETF, renderRadar, renderHoldings, renderSigTrack, renderPredStat, renderStreak].forEach(fn=>{
+    try{ fn(); }catch(e){ console.error("渲染出错:", e); } /* 单个面板出错不影响其他面板 */
+  });
 }
 
 async function run(){
@@ -1907,15 +1919,15 @@ async function run(){
     }
     await Promise.all(Array.from({length:3}, worker2));
   }
-  savePred(PRED);
-  trackSignals(); /* 存档今日信号，供胜率回看 */
-
-  renderAll();
+  /* 收尾三件事各自独立保护：任何一个出错都不许卡住整个页面 */
+  try{ savePred(PRED); }catch(e){}
+  try{ trackSignals(); }catch(e){} /* 存档今日信号，供胜率回看 */
+  try{ renderAll(); }catch(e){ console.error("renderAll出错：", e); }
 
   $("pbar").style.width = "100%";
   const now = new Date();
   $("updateTime").textContent = "更新于 " + now.toLocaleString("zh-CN", {hour12:false});
-  $("loadStatus").textContent = FAILED.length ? `完成（${FAILED.length}只失败）` : "加载完成";
+  $("loadStatus").textContent = (FAILED.length ? `完成（${FAILED.length}只失败）` : "加载完成") + (STORE_FULL ? " · ⚠浏览器存储已满，信号档案未保存" : "");
   btn.disabled = false; btn.textContent = "刷新数据";
   setTimeout(()=>{ $("pbar").style.width = "0%"; }, 1200);
 }
