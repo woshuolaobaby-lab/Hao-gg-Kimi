@@ -556,8 +556,9 @@ function analyzeFund(code, vals, ts, predData, marketFactor, profile){
     if(predData.明细.length>400) predData.明细 = predData.明细.slice(-400);
     delete predData.记录[code];
   }
-  if(预判金叉) predData.记录[code] = {date:todayStr, 预判:"即将金叉", 均线差:均线差, 数据日期:数据日期};
-  else if(预判死叉) predData.记录[code] = {date:todayStr, 预判:"即将死叉", 均线差:均线差, 数据日期:数据日期};
+  const isQDII = profile.sector==="海外"; /* QDII净值滞后1天，预埋预判经实测准确率太低(25%)，海外基金不发预埋 */
+  if(!isQDII && 预判金叉) predData.记录[code] = {date:todayStr, 预判:"即将金叉", 均线差:均线差, 数据日期:数据日期};
+  else if(!isQDII && 预判死叉) predData.记录[code] = {date:todayStr, 预判:"即将死叉", 均线差:均线差, 数据日期:数据日期};
 
   /* 加权评分 */
   let 买入评分=0, 卖出评分=0;
@@ -674,7 +675,8 @@ function analyzeFund(code, vals, ts, predData, marketFactor, profile){
   if(卖出评分>=4){ 建议="清仓"; 策略=是看好?"保留底仓，波段清仓":"全部清仓"; }
   else if(卖出评分>=2.5){ 建议="减仓"; 策略=是看好?"减仓避险，等低位回补":"减仓不补仓"; }
   else if(距高点>-3 && 卖出评分>=1){ 建议="止盈"; 策略=是看好?"止盈部分，底仓持有":"全部止盈"; }
-  else if(预判金叉 && !今日大涨){ 建议="预埋"; 策略=`预判${预判金叉天数}天内金叉，今日15:00前预埋`; }
+  else if(预判金叉 && !今日大涨 && !isQDII){ 建议="预埋"; 策略=`预判${预判金叉天数}天内金叉，今日15:00前预埋`; }
+  else if(预判金叉 && !今日大涨 && isQDII){ 建议="关注"; 策略="QDII净值滞后1天，金叉预判不可靠，等确认再入"; }
   else if(净评分>=5 && !今日大涨){ 建议="强烈买入"; 策略=是看好?"重仓买入，长期持有":"短线参与"; }
   else if(净评分>=3 && !今日大涨){ 建议="买入"; 策略=是看好?"正常买入，长期持有":"短线买入"; }
   else if(净评分>=1.5 && 金叉 && !今日大涨){ 建议="加仓"; 策略=是看好?"加仓摊低成本":"谨慎加仓"; }
@@ -927,13 +929,20 @@ let SIG_LOG = (()=>{ try{ return JSON.parse(localStorage.getItem("fund_sig_log_v
 function todayStr(){ const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function trackSignals(){
   try{
-    const buys = ["强烈买入","买入","加仓","补仓"], sells = ["清仓","减仓","止盈"];
+    /* 数据日期守卫：净值数据没推进（周末/节假日打开面板）就不重复存档，避免垃圾数据污染胜率 */
+    const ref = RESULTS.find(r=>r.代码==="510300" && !r.error) || RESULTS.find(r=>!r.error);
+    const dataDay = ref && ref._ts ? ref._ts[ref._ts.length-1] : null;
+    let meta = {};
+    try{ meta = JSON.parse(localStorage.getItem("fund_sig_meta")||"{}"); }catch(e){}
+    if(dataDay && meta.lastDataDay===dataDay) return; /* 数据没更新，跳过 */
+    const buys = ["强烈买入","买入","加仓","补仓","预埋"], sells = ["清仓","减仓","止盈"];
     const snap = RESULTS.filter(r=>buys.includes(r.建议)||sells.includes(r.建议))
       .map(r=>({c:r.代码, n:r.名称, a:r.建议, v:r.净值, side:buys.includes(r.建议)?"B":"S"}));
     if(snap.length) SIG_LOG[todayStr()] = snap;
     const keys = Object.keys(SIG_LOG).sort();
     while(keys.length>130){ delete SIG_LOG[keys.shift()]; } /* 只留最近约4个月 */
     safeSet("fund_sig_log_v1", JSON.stringify(SIG_LOG));
+    if(dataDay){ meta.lastDataDay = dataDay; safeSet("fund_sig_meta", JSON.stringify(meta)); }
   }catch(e){}
 }
 function renderSigTrack(){
