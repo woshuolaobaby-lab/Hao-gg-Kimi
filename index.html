@@ -461,10 +461,17 @@ function loadPred(){
   }catch(e){}
   return {记录:{}, 统计:{"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}}, 明细:[], _fix20260726:true};
 }
-/* localStorage 安全写入：浏览器存储满了就删掉最旧的信号档案再试一次；还失败就放弃（不影响页面渲染） */
+/* localStorage 安全写入：满了先删可自动重取的缓存，再删最旧信号档案，最后才放弃 */
 let STORE_FULL = false;
 function safeSet(key, val){
   try{ localStorage.setItem(key, val); return true; }catch(e){}
+  /* 第一轮：删掉能自动重新下载的缓存（估值/非农），再试 */
+  try{
+    localStorage.removeItem("fund_index_val");
+    localStorage.removeItem("fund_nfp_v1");
+    localStorage.setItem(key, val); return true;
+  }catch(e){}
+  /* 第二轮：信号档案只留最近90天，再试 */
   try{
     const ks = Object.keys(SIG_LOG||{}).sort();
     if(ks.length>90){ ks.slice(0, ks.length-90).forEach(k=>delete SIG_LOG[k]); localStorage.setItem("fund_sig_log_v1", JSON.stringify(SIG_LOG)); }
@@ -472,6 +479,29 @@ function safeSet(key, val){
   }catch(e){ STORE_FULL = true; return false; }
 }
 function savePred(d){ safeSet(PRED_KEY, JSON.stringify(d)); }
+
+/* 存储占用统计 + 一键清理（保留：信号档案/预埋统计/仓位/元数据，删掉可自动重取的缓存和旧版本残留） */
+function storageUsage(){
+  let total=0;
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i), v=localStorage.getItem(k)||"";
+      total += (k.length+v.length)*2/1024; /* 浏览器按UTF-16计，每字符约2字节 */
+    }
+  }catch(e){}
+  return total;
+}
+function cleanStorage(){
+  const keep = ["fund_sig_log_v1","fund_prediction_log","fund_sig_meta","fund_holdings"];
+  const del = [];
+  try{
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!keep.includes(k)) del.push(k); }
+    del.forEach(k=>localStorage.removeItem(k));
+  }catch(e){}
+  STORE_FULL = false;
+  renderPredStat();
+  alert("清理完成！删掉了 "+del.length+" 项缓存数据。\n信号档案、预埋统计、我的仓位都保留着。\n点右上角「刷新数据」就恢复正常存档了。");
+}
 /* 数据是否推进到了下一个交易日（周末/节假日净值不更新，跳过验证，避免误判） */
 function dataHasAdvanced(rec, 当前数据日期){
   if(!rec.数据日期) return true; /* 旧记录没有数据日期，按原逻辑验证 */
@@ -1022,7 +1052,9 @@ function renderPredStat(){
     `<div class="news-item"><span class="news-time">${d.date.slice(5)}</span><span style="flex:1;color:#c9d1d9">${d.name||d.code} <span style="color:#8b949e">${d.预判}（${d.发出?d.发出.slice(5)+"发出":""}）</span></span><span style="color:${d.结果==="正确"?"#3fb950":"#f85149"};font-size:12px">${d.结果==="正确"?"✓ 兑现":"✗ 未兑现"}</span></div>`).join("");
   g.innerHTML = `<div style="margin-bottom:6px">${chip("即将金叉")}${chip("即将死叉")}<div class="sigt-chip"><b>待验证</b><br><span style="color:#e3b341">${pending} 只</span><br><span style="color:#8b949e">已发出预判，等下个交易日</span></div></div>`
     + (detail || `<span style="color:#8b949e">验证明细会从第一次兑现/失误开始累计。</span>`)
-    + `<div style="margin-top:10px"><button class="btn" style="padding:5px 14px;font-size:12px" onclick="exportStats()">📥 导出信号+预埋数据（发给Kimi检查）</button> <button class="btn" style="padding:5px 14px;font-size:12px;background:#1f6feb" onclick="exportFundList()">📥 导出基金清单</button></div>`;
+    + `<div style="margin-top:10px"><button class="btn" style="padding:5px 14px;font-size:12px" onclick="exportStats()">📥 导出信号+预埋数据（发给Kimi检查）</button> <button class="btn" style="padding:5px 14px;font-size:12px;background:#1f6feb" onclick="exportFundList()">📥 导出基金清单</button></div>`
+    + (()=>{ const kb = storageUsage(); const pct = Math.min(100, kb/5120*100); const c = kb>4000 ? "#f85149" : kb>2500 ? "#e3b341" : "#3fb950";
+      return `<div style="margin-top:8px;font-size:12px;color:#8b949e">浏览器存储占用 <b style="color:${c}">${kb.toFixed(0)}KB</b> / 约5120KB <span class="vtrack" style="display:inline-block;width:120px;vertical-align:middle;margin:0 4px"><span class="vfill" style="display:block;height:100%;width:${pct}%;background:${c}"></span></span> <a href="javascript:void(0)" onclick="if(confirm('清理缓存数据？信号档案、预埋统计、我的仓位都会保留，只删可自动重新下载的缓存。'))cleanStorage()" style="color:#58a6ff">🧹 清理缓存（档案保留）</a>${STORE_FULL?' <span style="color:#f85149">⚠ 存储已满，点清理即可恢复存档</span>':""}</div>`; })();
 }
 
 /* 导出工具：生成txt文件下载 */
@@ -1094,7 +1126,10 @@ async function loadIndexVal(force){
         IDX_VAL = {};
         items.forEach(i=>{ IDX_VAL[i.index_code] = {name:i.name, pe:i.pe||0, pe_pct:Math.round((i.pe_percentile||0)*100), pb_pct:Math.round((i.pb_percentile||0)*100), roe:i.roe?+(i.roe*100).toFixed(1):null, yeild:i.yeild?+(i.yeild*100).toFixed(2):null, eva:i.eva_type}; });
         IDX_VAL_META = {date:today, stale:false};
-        try{ localStorage.setItem(KEY, JSON.stringify({date:today, data:IDX_VAL})); }catch(e){}
+        /* 缓存只存面板用到的指数（几千个指数全存太占地方，是存储爆满的主因） */
+        const KEEP = new Set(IDX_RULES.map(r=>r[1]));
+        const slim = {}; Object.keys(IDX_VAL).forEach(k=>{ if(KEEP.has(k)) slim[k]=IDX_VAL[k]; });
+        try{ safeSet(KEY, JSON.stringify({date:today, data:slim})); }catch(e){}
         return;
       }
     }catch(e){}
