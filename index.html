@@ -208,9 +208,11 @@
   </div>
 
   <div class="panel" style="margin-bottom:14px">
-    <h3>⚖️ 股债性价比 · 沪深300全收益 vs 二级债基<small>两线越接近=股市越便宜 · 两线重合=历史大底（2013/2016/2018/2022/2024都灵验，绿📍标记） · 数据:510300累计净值≈沪深300全收益 + 110008易方达稳健收益(老牌二级债基近似债基指数) · 2012年至今 · 仅参考不构成建议</small></h3>
+    <h3>⚖️ 股债性价比 · 沪深300全收益 vs 二级债基<small>红线=股 蓝线=债 · 红线跌破蓝线≠见底 · 跌到蓝线的75~85%=跌透=历史大底（2013/2016/2018/2022/2024五次全灵验，绿📍标记） · 下方小图=股债比，≤0.85进大底区 · 数据:510300累计净值≈沪深300全收益 + 110008易方达稳健收益(老牌二级债基近似债基指数) · 2012年至今 · 仅参考不构成建议</small></h3>
     <div id="sbChips" style="margin-bottom:6px"><span style="color:#8b949e">加载中…</span></div>
     <div id="sbChart" style="height:300px"></div>
+    <div style="font-size:12px;color:#8b949e;margin:6px 0 2px">📏 股债比走势（红线÷蓝线）——绿色区域=历史大底区，黄线跌进绿区=十年一遇的机会</div>
+    <div id="sbRatioChart" style="height:150px"></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -1188,7 +1190,7 @@ async function loadSB(){
       `<div class="sigt-chip">⚖️ 当前股债比 <b style="color:${band[1]};font-size:16px">${rNow.toFixed(2)}</b><br><span style="color:${band[1]}">${band[0]}</span></div>` +
       `<div class="sigt-chip">距"重合大底区"(≤0.85)<br><b>${rNow<=0.85 ? `<span style="color:#58a6ff">已在区内！</span>` : `<span style="color:#e3b341">沪深300再跌约 ${toBottom.toFixed(0)}%</span>`}</b></div>` +
       `<div class="sigt-chip">2012年以来累计<br>沪深300全收益 <span class="up">+${((sA[sA.length-1]-1)*100).toFixed(0)}%</span> · 二级债基 <span class="up">+${((sB[sB.length-1]-1)*100).toFixed(0)}%</span></div>` +
-      `<div class="sigt-chip" style="color:#8b949e;font-size:12px">绿📍=两线重合的历史大底<br>规律：重合后股市止跌回升</div>`;
+      `<div class="sigt-chip" style="color:#8b949e;font-size:12px">绿📍=跌透的历史大底<br>红线跌到蓝线75~85%后止跌回升</div>`;
     const ch = echarts.init(chartEl);
     ch.setOption({
       backgroundColor:"transparent",
@@ -1203,7 +1205,30 @@ async function loadSB(){
         {name:"二级债基",type:"line",data:sB,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#58a6ff"},itemStyle:{color:"#58a6ff"}}
       ]
     });
-    window.addEventListener("resize", ()=>ch.resize());
+    /* 股债比小图：绿区=历史大底区(≤0.85)，红虚线=过热区(≥1.25) */
+    const ratioEl = $("sbRatioChart");
+    let ch2 = null;
+    if(ratioEl){
+      ch2 = echarts.init(ratioEl);
+      ch2.setOption({
+        backgroundColor:"transparent",
+        grid:{left:45,right:15,top:22,bottom:18},
+        tooltip:{trigger:"axis",backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
+          formatter: ps => ps.length ? `${ps[0].axisValue}<br>股债比 <b>${(+ps[0].data).toFixed(3)}</b>` : ""},
+        xAxis:{type:"category",data:dates,axisLabel:{color:"#8b949e",fontSize:10},axisLine:{lineStyle:{color:"#30363d"}}},
+        yAxis:{type:"value",min:0.6,max:1.5,name:"股债比",nameTextStyle:{color:"#8b949e",fontSize:10},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
+        series:[{name:"股债比",type:"line",data:sR.map(v=>+v.toFixed(3)),showSymbol:false,sampling:"lttb",
+          lineStyle:{width:1.4,color:"#e3b341"},itemStyle:{color:"#e3b341"},
+          markArea:{itemStyle:{color:"rgba(63,185,80,0.12)"},
+            data:[[{yAxis:0.6,label:{show:true,position:"insideBottomLeft",color:"#3fb950",fontSize:11,formatter:"历史大底区 ≤0.85"}},{yAxis:0.85}]]},
+          markLine:{symbol:"none",data:[
+            {yAxis:0.85,lineStyle:{color:"#3fb950",type:"dashed"},label:{show:false}},
+            {yAxis:1.25,lineStyle:{color:"#f85149",type:"dashed"},label:{show:true,position:"insideEndTop",color:"#f85149",fontSize:10,formatter:"过热区 ≥1.25"}}
+          ]}}
+        ]
+      });
+    }
+    window.addEventListener("resize", ()=>{ ch.resize(); if(ch2) ch2.resize(); });
   }catch(e){
     chipEl.innerHTML = `<span style="color:#8b949e">股债数据暂时获取失败（不影响其他功能，点"刷新数据"重试）</span>`;
   }
