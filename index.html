@@ -198,13 +198,19 @@
   </div>
 
   <div class="panel" style="margin-bottom:14px">
-    <h3>🌐 全球宏观参考<small>美元指数 · 美债2/10/30年收益率与利差 · 黄金 · 比特币/以太坊(避险资金) · 美联储加息降息观察 · 美国非农 · 点击卡片看K线 · 只作参考，不计入买卖信号</small></h3>
+    <h3>🌐 全球宏观参考<small>美元指数 · 美债2/10/30年收益率与利差 · 黄金 · 比特币/以太坊(避险资金) · 美国非农 · 点击卡片看K线 · 只作参考，不计入买卖信号</small></h3>
     <div id="macroGrid"><span style="color:#8b949e">加载中…</span></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
     <h3>🔥 第二层：指数估值<small>不能只看MACD · 当前PE · PE/PB历史分位 · 好公司还要好价格 · 估值极高时买入信号自动降级 · 数据源:蛋卷基金(每日)</small></h3>
     <div id="valGrid"><span style="color:#8b949e">加载中…</span></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px">
+    <h3>⚖️ 股债性价比 · 沪深300全收益 vs 二级债基<small>两线越接近=股市越便宜 · 两线重合=历史大底（2013/2016/2018/2022/2024都灵验，绿📍标记） · 数据:510300累计净值≈沪深300全收益 + 110008易方达稳健收益(老牌二级债基近似债基指数) · 2012年至今 · 仅参考不构成建议</small></h3>
+    <div id="sbChips" style="margin-bottom:6px"><span style="color:#8b949e">加载中…</span></div>
+    <div id="sbChart" style="height:300px"></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -215,11 +221,6 @@
   <div class="panel" style="margin-bottom:14px">
     <h3>🎯 强弱雷达 · 机会与风险预警<small>板块相对强弱 · 基金收益排名 · 黄金坑/顶部风险/创新高·新低报警 · 点击看详情</small></h3>
     <div id="radarGrid" class="toplist"><span style="color:#8b949e">加载中…</span></div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px">
-    <h3>📰 全球财经快讯<small>7×24实时财经新闻 · 橙色=与你相关的关键词(美联储/非农/加息降息/黄金等) · 点击标题看原文 · 财联社/华尔街见闻等入口在底部</small></h3>
-    <div id="newsGrid"><span style="color:#8b949e">加载中…</span></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -346,6 +347,7 @@ function loadFund(code, retries=3){
         clearTimeout(timer);
         const trend = window.Data_netWorthTrend;
         const name = window.fS_name;
+        const acT = window.Data_ACWorthTrend; /* 累计净值（含分红再投），股债性价比图用 */
         s.remove();
         if(!trend || !trend.length){
           cleanGlobals();
@@ -353,9 +355,10 @@ function loadFund(code, retries=3){
         }
         const vals = trend.map(d=>parseFloat(d.y)).filter(v=>!isNaN(v));
         const ts = trend.map(d=>d.x);
+        const ac = (acT && acT.length) ? acT.map(p=>Array.isArray(p) ? ({x:p[0], y:parseFloat(p[1])}) : ({x:p.x, y:parseFloat(p.y)})) : null;
         cleanGlobals();
         if(vals.length < 62) return fail("数据不足");
-        resolve({ code, name: name||code, vals, ts });
+        resolve({ code, name: name||code, vals, ts, ac });
       };
       s.onerror = ()=>{ clearTimeout(timer); s.remove(); cleanGlobals(); fail("网络错误"); };
       document.head.appendChild(s);
@@ -828,7 +831,7 @@ function jointEnv(parts){
 }
 
 /* ======== 全球宏观参考（美元指数/美债/黄金/币/美联储/非农，只参考不计入信号） ======== */
-let MACRO = {}, NFP = null, NEWS = null;
+let MACRO = {}, NFP = null;
 async function loadMacro(){
   MACRO = {};
   /* 东财：美元指数 + COMEX黄金 + 黄金9999（和指数点位同通道，稳定） */
@@ -916,42 +919,6 @@ function renderMacro(){
     NFP ? `<b>${NFP.add>=0?"+":""}${NFP.add}万</b> <span style="font-size:12px;color:#8b949e">${NFP.month}</span>` : "暂未获取",
     (NFP ? `失业率 ${NFP.unrate}% · ` : "") + (nx ? `下次公布 ${nx.getMonth()+1}月${nx.getDate()}日` : "每月第一个周五"));
   h += `</div>`;
-  /* 美联储观察入口 */
-  h += `<div class="ext-links" style="margin-top:10px"><span style="font-size:12px;color:#8b949e;line-height:26px">🏛 美联储加息/降息观察 →</span>
-    <a href="https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html" target="_blank" rel="noopener">CME 利率概率（FedWatch）</a>
-    <a href="https://www.jin10.com/" target="_blank" rel="noopener">金十数据（财经日历）</a>
-    <a href="https://fred.stlouisfed.org/series/PAYEMS" target="_blank" rel="noopener">FRED 非农原始数据</a></div>`;
-  g.innerHTML = h;
-}
-/* ======== 全球财经快讯（东财7×24，<script>方式加载天然跨域） ======== */
-function loadNews(){
-  NEWS = null;
-  const s = document.createElement("script");
-  s.src = "https://newsapi.eastmoney.com/kuaixun/v1/getlist_101_ajaxResult_50_1_.html?_=" + Date.now();
-  s.onload = ()=>{ try{ NEWS = (window.ajaxResult && window.ajaxResult.LivesList) || []; }catch(e){ NEWS = []; } renderNews(); };
-  s.onerror = ()=>{ NEWS = []; renderNews(); };
-  document.body.appendChild(s);
-}
-function renderNews(){
-  const g = $("newsGrid"); if(!g) return;
-  const kw = /(美联储|非农|加息|降息|利率|央行|黄金|白银|原油|A股|沪指|美股|纳指|标普|日经|比特币|以太坊|ETF|基金)/;
-  let h = "";
-  if(NEWS && NEWS.length){
-    h += `<div class="news-list">` + NEWS.slice(0,15).map(n=>{
-      const t = (n.showtime||"").slice(5,16);
-      const title = n.simtitle || n.title || "";
-      const hot = kw.test(title);
-      return `<div class="news-item"><span class="news-time">${t}</span><a href="${n.url_w}" target="_blank" rel="noopener" class="${hot?"news-hl":""}">${title}</a></div>`;
-    }).join("") + `</div>`;
-  } else if(NEWS && !NEWS.length){
-    h += `<span style="color:#8b949e">快讯暂时获取失败，点下方链接直接看 →</span>`;
-  } else { h += `<span style="color:#8b949e">加载中…</span>`; }
-  h += `<div class="ext-links"><span style="font-size:12px;color:#8b949e;line-height:26px">更多新闻源 →</span>
-    <a href="https://www.cls.cn/telegraph" target="_blank" rel="noopener">财联社·电报</a>
-    <a href="https://wallstreetcn.com/live" target="_blank" rel="noopener">华尔街见闻·快讯</a>
-    <a href="https://www.jin10.com/" target="_blank" rel="noopener">金十数据</a>
-    <a href="https://cn.wsj.com/" target="_blank" rel="noopener">华尔街日报中文网</a>
-    <a href="https://kuaixun.eastmoney.com/" target="_blank" rel="noopener">东方财富7×24</a></div>`;
   g.innerHTML = h;
 }
 /* ======== 信号追踪：每天存档买入/卖出信号+净值，5/20/60/90天后算胜率（3个月预判准确率） ======== */
@@ -1182,6 +1149,64 @@ const IDX_RULES = [
 function fundIndexOf(name){
   for(const [re,c] of IDX_RULES){ if(re.test(name)) return c; }
   return null;
+}
+
+/* ======== 股债性价比：沪深300全收益(510300累计净值) vs 二级债基(110008易方达稳健收益) ======== */
+/* 两线重合=历史大底（实测：2013/2016/2018/2022/2024大底股债比都在0.75~0.85），顶部≥1.04 */
+async function loadSB(){
+  const chipEl = $("sbChips"), chartEl = $("sbChart");
+  if(!chipEl || !chartEl) return;
+  try{
+    const [a, b] = await Promise.all([loadFund("510300"), loadFund("110008")]);
+    if(a.error || b.error || !a.ac || !b.ac) throw new Error("sb数据获取失败");
+    const mB = {}; b.ac.forEach(p=>{ mB[p.x] = p.y; });
+    const pts = [];
+    a.ac.forEach(p=>{ if(mB[p.x]!=null) pts.push([p.x, p.y, mB[p.x]]); });
+    if(pts.length < 500) throw new Error("sb数据不足");
+    const bA = pts[0][1], bB = pts[0][2];
+    const dates = [], sA = [], sB = [], sR = [];
+    pts.forEach(p=>{
+      const d = new Date(p[0]);
+      dates.push(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"));
+      sA.push(+(p[1]/bA).toFixed(4));
+      sB.push(+(p[2]/bB).toFixed(4));
+      sR.push((p[1]/bA)/(p[2]/bB));
+    });
+    const rNow = sR[sR.length-1];
+    const band = rNow<=0.85 ? ["重合区 · 历史大底信号","#58a6ff"] : rNow<=0.95 ? ["偏低 · 股市性价比好","#3fb950"] : rNow<=1.05 ? ["中性区间","#8b949e"] : rNow<=1.25 ? ["偏高 · 股市偏热","#ffa657"] : ["过热区 · 历史顶部信号","#f85149"];
+    const toBottom = (rNow/0.85-1)*100;
+    /* 历史大底标记：股债比<0.86 且是前后约90个交易日里的最低点 */
+    const marks = [];
+    for(let i=0;i<sR.length;i++){
+      if(sR[i] >= 0.86) continue;
+      const lo = Math.max(0,i-90), hi = Math.min(sR.length-1, i+90);
+      let isMin = true;
+      for(let j=lo;j<=hi;j++){ if(sR[j] < sR[i]-0.0001){ isMin=false; break; } }
+      if(isMin) marks.push({coord:[i, sA[i]]});
+    }
+    chipEl.innerHTML =
+      `<div class="sigt-chip">⚖️ 当前股债比 <b style="color:${band[1]};font-size:16px">${rNow.toFixed(2)}</b><br><span style="color:${band[1]}">${band[0]}</span></div>` +
+      `<div class="sigt-chip">距"重合大底区"(≤0.85)<br><b>${rNow<=0.85 ? `<span style="color:#58a6ff">已在区内！</span>` : `<span style="color:#e3b341">沪深300再跌约 ${toBottom.toFixed(0)}%</span>`}</b></div>` +
+      `<div class="sigt-chip">2012年以来累计<br>沪深300全收益 <span class="up">+${((sA[sA.length-1]-1)*100).toFixed(0)}%</span> · 二级债基 <span class="up">+${((sB[sB.length-1]-1)*100).toFixed(0)}%</span></div>` +
+      `<div class="sigt-chip" style="color:#8b949e;font-size:12px">绿📍=两线重合的历史大底<br>规律：重合后股市止跌回升</div>`;
+    const ch = echarts.init(chartEl);
+    ch.setOption({
+      backgroundColor:"transparent",
+      grid:{left:45,right:15,top:32,bottom:26},
+      legend:{data:["沪深300全收益","二级债基"],textStyle:{color:"#8b949e"},top:0},
+      tooltip:{trigger:"axis",backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"}},
+      xAxis:{type:"category",data:dates,axisLabel:{color:"#8b949e"},axisLine:{lineStyle:{color:"#30363d"}}},
+      yAxis:{type:"value",name:"2012年=1",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e"},splitLine:{lineStyle:{color:"#21262d"}}},
+      series:[
+        {name:"沪深300全收益",type:"line",data:sA,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#ff7b72"},itemStyle:{color:"#ff7b72"},
+         markPoint:{data:marks,symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
+        {name:"二级债基",type:"line",data:sB,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#58a6ff"},itemStyle:{color:"#58a6ff"}}
+      ]
+    });
+    window.addEventListener("resize", ()=>ch.resize());
+  }catch(e){
+    chipEl.innerHTML = `<span style="color:#8b949e">股债数据暂时获取失败（不影响其他功能，点"刷新数据"重试）</span>`;
+  }
 }
 
 /* ======== 第三层：ETF资金趋势（量比 + 主力资金，分辨真突破与诱多） ======== */
@@ -1914,8 +1939,8 @@ async function run(){
   await valPromise;
   /* 第三层：取ETF实时行情（量比+主力资金） */
   await loadETFQuotes();
-  /* 宏观参考 + 财经快讯：独立通道，不阻塞主流程 */
-  loadMacro(); loadNFP(); loadNews();
+  /* 宏观参考 + 股债性价比：独立通道，不阻塞主流程 */
+  loadMacro(); loadNFP(); loadSB();
   const badge = $("envBadge");
   badge.textContent = env.cn状态 ? `🌐大环境: ${env.状态}·${env.细分} · A股${env.cn状态} QQQ${env.qqq} VOO${env.voo} 日经${env.日经} 韩国${env.韩国} 英国${env.英国||"🟡"} · 加成×${env.加成}` : `大盘: ${env.状态} · 加成×${env.加成}`;
   badge.className = "env-badge " + (env.状态==="顺风"?"env-bull":env.状态==="逆风"?"env-bear":env.状态==="未知"?"env-unknown":"env-shake");
