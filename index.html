@@ -212,7 +212,7 @@
     <div id="sbChips" style="margin-bottom:6px"><span style="color:#8b949e">加载中…</span></div>
     <div id="sbChart" style="height:300px"></div>
     <div style="font-size:12px;color:#8b949e;margin:6px 0 2px">📏 股债比走势（红线÷蓝线）——绿色区域=历史大底区，黄线跌进绿区=十年一遇的机会</div>
-    <div id="sbRatioChart" style="height:150px"></div>
+    <div id="sbRatioChart" style="height:230px"></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -1196,8 +1196,10 @@ async function loadSB(){
       backgroundColor:"transparent",
       grid:{left:45,right:15,top:32,bottom:26},
       legend:{data:["沪深300全收益","二级债基"],textStyle:{color:"#8b949e"},top:0},
-      tooltip:{trigger:"axis",backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"}},
-      xAxis:{type:"category",data:dates,axisLabel:{color:"#8b949e"},axisLine:{lineStyle:{color:"#30363d"}}},
+      tooltip:{trigger:"axis",confine:true,hideDelay:200,enterable:false,transitionDuration:0.1,backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
+        position:(pt,pr,dom,rc,sz)=>[sz.viewSize[0]-sz.contentSize[0]-12, 6], /* 固定在图内右上角，边缘不闪不挤 */
+        axisPointer:{type:"line",snap:true,label:{show:true,backgroundColor:"#30363d",color:"#c9d1d9"}}},
+      xAxis:{type:"category",data:dates,axisLabel:{color:"#8b949e",showMaxLabel:true},axisLine:{lineStyle:{color:"#30363d"}}},
       yAxis:{type:"value",name:"2012年=1",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e"},splitLine:{lineStyle:{color:"#21262d"}}},
       series:[
         {name:"沪深300全收益",type:"line",data:sA,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#ff7b72"},itemStyle:{color:"#ff7b72"},
@@ -1213,9 +1215,11 @@ async function loadSB(){
       ch2.setOption({
         backgroundColor:"transparent",
         grid:{left:45,right:15,top:22,bottom:18},
-        tooltip:{trigger:"axis",backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
+        tooltip:{trigger:"axis",confine:true,hideDelay:200,enterable:false,transitionDuration:0.1,backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
+          position:(pt,pr,dom,rc,sz)=>[sz.viewSize[0]-sz.contentSize[0]-12, 6], /* 固定在图内右上角，边缘不闪不挤 */
+          axisPointer:{type:"line",snap:true,lineStyle:{color:"#e3b341"},label:{show:true,backgroundColor:"#30363d",color:"#c9d1d9"}},
           formatter: ps => ps.length ? `${ps[0].axisValue}<br>股债比 <b>${(+ps[0].data).toFixed(3)}</b>` : ""},
-        xAxis:{type:"category",data:dates,axisLabel:{color:"#8b949e",fontSize:10},axisLine:{lineStyle:{color:"#30363d"}}},
+        xAxis:{type:"category",data:dates,boundaryGap:false,axisLabel:{color:"#8b949e",fontSize:10,showMaxLabel:true},axisLine:{lineStyle:{color:"#30363d"}}},
         yAxis:{type:"value",min:0.6,max:1.5,name:"股债比",nameTextStyle:{color:"#8b949e",fontSize:10},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
         series:[{name:"股债比",type:"line",data:sR.map(v=>+v.toFixed(3)),showSymbol:false,sampling:"lttb",
           lineStyle:{width:1.4,color:"#e3b341"},itemStyle:{color:"#e3b341"},
