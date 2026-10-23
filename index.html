@@ -181,6 +181,7 @@
 <div class="tabbar">
   <button class="tab-btn active" id="tabFunds" onclick="switchTab('funds')">📊 基金监控</button>
   <button class="tab-btn" id="tabFlow" onclick="switchTab('flow')">💰 资金流向</button>
+  <button class="tab-btn" id="tabWidth" onclick="switchTab('width')">📡 市场宽度</button>
 </div>
 
 <div class="container" id="viewFunds">
@@ -310,6 +311,43 @@
     <span id="fwUpdated"></span> <button class="btn" onclick="flowLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button><br>
     数据来源: 东方财富资金流向公开接口（延迟约15分钟）· 历史快照保存在本浏览器并含接口回填<br>
     本面板仅供参考，不构成投资建议
+  </div>
+</div>
+
+<!-- ================= 市场宽度视图 ================= -->
+<div class="container" id="viewWidth" style="display:none">
+  <div class="flow-hero">
+    <span class="fh-badge" id="wdBadge">加载中…</span>
+    <div class="fh-title">市场宽度 · 阿姆斯指标（TRIN）</div>
+    <div class="fh-sub" id="wdDate">上涨/下跌家数 × 成交额 → 量价关系诊断</div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">上涨家数</div><div class="value" id="wdAdv" style="font-size:30px;color:#ff4d4f">-</div><div class="sub" id="wdAdvSub">全市场沪深A股</div></div>
+    <div class="card"><div class="label">下跌家数</div><div class="value" id="wdDec" style="font-size:30px;color:#00c853">-</div><div class="sub" id="wdDecSub">全市场沪深A股</div></div>
+    <div class="card"><div class="label">红盘率（上涨占比）</div><div class="value" id="wdPct" style="font-size:30px">-</div><div class="sub" id="wdPctSub">9/22崩塌前就是80%→43.7%</div></div>
+    <div class="card"><div class="label">平盘 / 涨停 / 跌停</div><div class="value" id="wdMisc" style="font-size:22px">-</div><div class="sub">涨停/跌停为±9.8%近似口径</div></div>
+    <div class="card"><div class="label">阿姆斯指标 TRIN</div><div class="value" id="wdTrin" style="font-size:30px;color:#e3b341">-</div><div class="sub" id="wdTrinSub">家数倍数 ÷ 成交额倍数</div></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px">
+    <h3>⚖️ 量价关系 · 倍数标注<small>每次打开自动算好：家数倍数 ÷ 成交额倍数 = 阿姆斯指标</small></h3>
+    <div id="wdRatio" style="font-size:14px;line-height:2">加载中…</div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px">
+    <h3>💰 资金去向 · 成交额被谁吃掉<small>上涨股票成交额 vs 下跌股票成交额 · 下跌占比异常高=权重出货</small></h3>
+    <div id="wdMoney">加载中…</div>
+  </div>
+
+  <div class="panel">
+    <h3>📈 宽度历史走势<small>红盘率 + 阿姆斯指标 · 每天自动存档（只存在你自己浏览器），攒出属于你自己的9/21→9/22</small></h3>
+    <div id="wdChart" class="chart" style="height:300px"></div>
+  </div>
+
+  <div class="foot">
+    <span id="wdUpdated"></span> <button class="btn" onclick="widthLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button><br>
+    数据来源：东方财富全市场个股行情实时计算（沪深A股，盘中实时）· 本面板仅供参考，不构成投资建议
   </div>
 </div>
 
@@ -1909,14 +1947,161 @@ const FLOW_STOCKS = "0.300750,0.300418,0.002896,0.300364,1.600667";
 let FLOW_DATA = { inflow:[], outflow:[], stocks:[] };
 let FLOW_CODES = {};
 
+/* ======== 市场宽度：全A涨跌家数×成交额 → 阿姆斯指标(TRIN) · 量价背离诊断 ======== */
+/* 判据（按你给的9/21案例）：家数倍数 R1 ÷ 成交额倍数 R2 = TRIN。
+   R1大但TRIN>1 → 上涨家数虚胖、成交额没跟上 → 权重放量出货、小票补涨 → 宽度随时崩塌 */
+const WD_KEY = "fund_breadth_v1";
+let WD_LOADING = false, WD_SNAP = null;
+function wdRead(){ try{ return JSON.parse(localStorage.getItem(WD_KEY)||"{}"); }catch(e){ return {}; } }
+
+async function widthLoad(force){
+  if(WD_LOADING) return;
+  if(WD_SNAP && !force && Date.now()-WD_SNAP._at < 5*60*1000){ wdRender(WD_SNAP); return; } /* 5分钟内不重复抓 */
+  WD_LOADING = true;
+  $("wdBadge").textContent = "统计中…";
+  try{
+    const FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"; /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所） */
+    const FIELDS = "f12,f3,f6,f124";
+    const first = await flowJson(`${FLOW_BASE}/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+    const total = (first.data && first.data.total) || 0;
+    const rows0 = (first.data && first.data.diff) || [];
+    if(!total || !rows0.length) throw new Error("接口无数据");
+    const pzReal = rows0.length; /* 服务端可能压页大小，按实际返回条数翻页 */
+    const rows = rows0.slice();
+    const pages = Math.ceil(total / pzReal);
+    let pn = 2;
+    await Promise.all(Array.from({length:4}, async ()=>{
+      while(pn <= pages){
+        const cur = pn++;
+        try{
+          const j = await flowJson(`${FLOW_BASE}/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+          ((j.data && j.data.diff) || []).forEach(r=>rows.push(r));
+        }catch(e){}
+      }
+    }));
+    let adv=0, dec=0, flat=0, advAmt=0, decAmt=0, limitUp=0, limitDown=0, ts=0;
+    rows.forEach(r=>{
+      if(typeof r.f3 !== "number") return; /* 停牌 */
+      if(r.f3 > 0){ adv++; advAmt += r.f6||0; }
+      else if(r.f3 < 0){ dec++; decAmt += r.f6||0; }
+      else flat++;
+      if(r.f3 >= 9.8) limitUp++;      /* 近似口径：主板10%/创业科创20%未细分，±9.8%以上算涨停 */
+      if(r.f3 <= -9.8) limitDown++;
+      if(r.f124 > ts) ts = r.f124;
+    });
+    if(adv+dec < 3000) throw new Error("数据不全，只拿到"+(adv+dec)+"只");
+    const decSafe = dec||1, decAmtSafe = decAmt||1;
+    const r1 = adv/decSafe;               /* 家数倍数 */
+    const r2 = advAmt/decAmtSafe;         /* 成交额倍数 */
+    const trin = r1/r2;                   /* 阿姆斯指标 */
+    const breadth = adv/(adv+dec)*100;    /* 红盘率 */
+    const decAmtPct = decAmt/(advAmt+decAmt)*100; /* 下跌股票吃掉的全市场成交额占比 */
+    const d = bjDateStr(bjNow());
+    const snap = { d, adv, dec, flat, limitUp, limitDown, advAmt:advAmt/1e8, decAmt:decAmt/1e8,
+      r1:+r1.toFixed(2), r2:+r2.toFixed(2), trin:+trin.toFixed(2), breadth:+breadth.toFixed(1),
+      decAmtPct:+decAmtPct.toFixed(1), ts, _at:Date.now() };
+    WD_SNAP = snap;
+    /* 每天一档自动存档（当天反复打开会覆盖，留下当天最后一次） */
+    try{ const h = wdRead(); h[d] = {adv,dec,flat,up:limitUp,dn:limitDown,aA:+snap.advAmt.toFixed(0),dA:+snap.decAmt.toFixed(0),trin:snap.trin,bp:snap.breadth};
+      const ks = Object.keys(h).sort(); while(ks.length>250) delete h[ks.shift()];
+      safeSet(WD_KEY, JSON.stringify(h)); }catch(e){}
+    wdRender(snap);
+  }catch(e){
+    $("wdBadge").textContent = "获取失败";
+    $("wdRatio").innerHTML = `<span style="color:#f85149">全市场数据获取失败（${e.message||e}），点右下角「手动刷新」重试</span>`;
+  }
+  WD_LOADING = false;
+}
+
+function wdRender(s){
+  const fmtT = t => { const d=new Date(t*1000); return `${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`; };
+  /* —— 卡片 —— */
+  $("wdAdv").textContent = s.adv; $("wdAdvSub").textContent = `成交额 ${s.advAmt.toFixed(0)} 亿`;
+  $("wdDec").textContent = s.dec; $("wdDecSub").textContent = `成交额 ${s.decAmt.toFixed(0)} 亿`;
+  const bpColor = s.breadth>=65 ? "#ff4d4f" : s.breadth>=50 ? "#ffa657" : "#00c853";
+  $("wdPct").textContent = s.breadth + "%"; $("wdPct").style.color = bpColor;
+  $("wdPctSub").textContent = `上涨占比 · 数据截至 ${s.ts?fmtT(s.ts):"--"}`;
+  $("wdMisc").innerHTML = `<span style="color:#8b949e">${s.flat}</span> / <span style="color:#ff4d4f">${s.limitUp}</span> / <span style="color:#00c853">${s.limitDown}</span>`;
+  $("wdTrin").textContent = s.trin;
+  const tColor = s.trin<=0.85 ? "#ff4d4f" : s.trin<=1.15 ? "#e3b341" : "#f85149";
+  $("wdTrin").style.color = tColor;
+  $("wdTrinSub").textContent = s.trin<=1 ? "≤1 量能配合" : ">1 量能掉队";
+  /* —— 诊断（照你9/21的推理逻辑）—— */
+  let badge, verdict, color;
+  if(s.r1>=1.2 && s.trin>1.15){
+    badge="⚠ 量价背离"; color="#f85149";
+    verdict = `<b style="color:#f85149">🔴 量价背离 · 权重出货预警</b>：上涨家数是下跌的 <b>${s.r1}</b> 倍，健康上涨成交额应该同步到 ${s.r1} 倍，但实际只有 <b>${s.r2}</b> 倍（TRIN=${s.trin}）。只占少数的下跌股票吃掉了全市场 <b>${s.decAmtPct}%</b> 的成交额——权重在放量出货、小票补涨，宽度随时可能崩塌（参考9/21→9/22：80%→43.7%）。别追小票，盯紧明天宽度。`;
+  } else if(s.r1>=1.2 && s.trin<=0.85){
+    badge="🟢 健康上涨"; color="#3fb950";
+    verdict = `<b style="color:#3fb950">🟢 健康上涨 · 量价配合</b>：上涨家数是下跌的 <b>${s.r1}</b> 倍，成交额也同步放大到 <b>${s.r2}</b> 倍（TRIN=${s.trin}），真金白银在推，多数股票上涨有资金支持。`;
+  } else if(s.r1>=1.2){
+    badge="🟡 普涨·量能一般"; color="#e3b341";
+    verdict = `<b style="color:#e3b341">🟡 上涨占优 · 量能基本匹配</b>：家数倍数 <b>${s.r1}</b>，成交额倍数 <b>${s.r2}</b>（TRIN=${s.trin}），在正常区间，暂无背离信号。`;
+  } else if(s.r1<=0.83 && s.trin<0.85){
+    badge="🟡 指数失真"; color="#e3b341";
+    verdict = `<b style="color:#e3b341">🟡 跌面大但量能不重 · 权重护盘</b>：下跌家数是上涨的 <b>${(1/s.r1).toFixed(2)}</b> 倍，但下跌成交额不重（TRIN=${s.trin}），小票普跌、权重在扛指数——别被指数骗了，个股实际偏弱。`;
+  } else if(s.r1<=0.83 && s.trin>1.5){
+    badge="🔴 恐慌放量"; color="#f85149";
+    verdict = `<b style="color:#f85149">🔴 普跌 + 放量下杀</b>：下跌家数是上涨的 <b>${(1/s.r1).toFixed(2)}</b> 倍，且下跌成交额明显放大（TRIN=${s.trin}），空方主导，管住手。`;
+  } else if(s.r1<=0.83){
+    badge="🔴 空方占优"; color="#f85149";
+    verdict = `<b style="color:#f85149">🔴 下跌家数占优</b>：下跌家数是上涨的 <b>${(1/s.r1).toFixed(2)}</b> 倍，TRIN=${s.trin}，市场偏弱，等待宽度修复。`;
+  } else {
+    badge="⚪ 多空僵持"; color="#8b949e";
+    verdict = `<b>⚪ 多空僵持</b>：上涨/下跌家数接近（${s.adv} / ${s.dec}），TRIN=${s.trin}，方向不明，按各自基金信号操作。`;
+  }
+  $("wdBadge").textContent = badge; $("wdBadge").style.background = color;
+  $("wdRatio").innerHTML =
+    `<div style="font-size:15px">① 上涨家数 <b style="color:#ff4d4f">${s.adv}</b> 家 ÷ 下跌 <b style="color:#00c853">${s.dec}</b> 家 ＝ 家数倍数 <b style="color:#ff4d4f">${s.r1}</b> 倍</div>
+     <div style="font-size:15px">② 上涨成交额 <b style="color:#ff4d4f">${s.advAmt.toFixed(0)}</b> 亿 ÷ 下跌 <b style="color:#00c853">${s.decAmt.toFixed(0)}</b> 亿 ＝ 成交额倍数 <b style="color:#ff4d4f">${s.r2}</b> 倍</div>
+     <div style="font-size:15px">③ 阿姆斯指标 ＝ ① ÷ ② ＝ <b style="color:${tColor};font-size:20px">${s.trin}</b> <span style="color:#8b949e;font-size:12px">（≈1 健康 · 明显>1 上涨虚胖/量能掉队 · 明显<1 量能超额配合）</span></div>
+     <div style="margin-top:10px;padding:10px 12px;background:#161b22;border-left:3px solid ${color};border-radius:6px;line-height:1.9">${verdict}</div>`;
+  $("wdDate").textContent = `${s.d} ${s.ts?fmtT(s.ts):""} · 沪深A股 ${s.adv+s.dec+s.flat} 只在交易（停牌未计入）`;
+  $("wdUpdated").textContent = "更新于 " + new Date().toLocaleString("zh-CN",{hour12:false});
+  /* —— 资金去向条 —— */
+  const tot = s.advAmt + s.decAmt, aPct = s.advAmt/tot*100;
+  $("wdMoney").innerHTML =
+    `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>🔴 上涨股票吃掉 <b style="color:#ff4d4f">${s.advAmt.toFixed(0)}亿</b>（${aPct.toFixed(1)}%）</span><span>🟢 下跌股票吃掉 <b style="color:#00c853">${s.decAmt.toFixed(0)}亿</b>（${(100-aPct).toFixed(1)}%）</span></div>
+     <div style="display:flex;height:26px;border-radius:6px;overflow:hidden;margin-top:6px">
+       <div style="width:${aPct}%;background:#ff4d4f"></div><div style="flex:1;background:#00c853"></div></div></div>
+     <div style="font-size:12px;color:#8b949e">看盘要点：红盘率很高但绿色段占比也偏大（如只占17.6%的下跌股吃掉27%的成交额）= 权重放量出货的典型特征，次日宽度容易崩。</div>`;
+  /* —— 历史图 —— */
+  const h = wdRead(), days = Object.keys(h).sort();
+  const el = $("wdChart");
+  const old = echarts.getInstanceByDom(el); if(old) old.dispose();
+  const ch = echarts.init(el);
+  ch.setOption({
+    backgroundColor:"transparent",
+    grid:{left:45,right:45,top:32,bottom:26},
+    legend:{data:["红盘率%","阿姆斯指标TRIN"],textStyle:{color:"#8b949e"},top:0},
+    tooltip:{trigger:"axis",confine:true,backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
+      formatter:ps=>{ const d=days[ps[0].dataIndex], r=h[d];
+        return `<b>${d}</b><br>红盘率 <b>${r.bp}%</b>（涨${r.adv}/跌${r.dec}）<br>TRIN <b>${r.trin}</b> · 成交额 涨${r.aA}亿/跌${r.dA}亿<br>涨停${r.up} · 跌停${r.dn}`; }},
+    xAxis:{type:"category",data:days.map(d=>d.slice(5)),axisLabel:{color:"#8b949e",fontSize:10},axisLine:{lineStyle:{color:"#30363d"}}},
+    yAxis:[{type:"value",min:0,max:100,name:"红盘率%",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
+           {type:"value",min:0,max:3,name:"TRIN",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{show:false}}],
+    series:[
+      {name:"红盘率%",type:"line",data:days.map(d=>h[d].bp),showSymbol:true,symbolSize:5,lineStyle:{width:2,color:"#ff7b72"},itemStyle:{color:"#ff7b72"}},
+      {name:"阿姆斯指标TRIN",type:"line",yAxisIndex:1,data:days.map(d=>h[d].trin),showSymbol:true,symbolSize:5,lineStyle:{width:1.6,type:"dashed",color:"#e3b341"},itemStyle:{color:"#e3b341"},
+       markLine:{symbol:"none",data:[{yAxis:1,lineStyle:{color:"#8b949e",type:"dashed"},label:{show:true,position:"insideEndTop",color:"#8b949e",fontSize:10,formatter:"TRIN=1 量能分水岭"}}]}}
+    ]
+  });
+  if(days.length===1) ch.setOption({graphic:{type:"text",left:"center",top:"middle",style:{text:"历史走势从明天开始累积，每天打开一次即可",fill:"#8b949e",fontSize:13}}});
+}
+
 window.switchTab = function(t){
-  const funds = t === "funds";
+  const funds = t === "funds", width = t === "width";
   $("viewFunds").style.display = funds ? "" : "none";
-  $("viewFlow").style.display  = funds ? "none" : "";
+  $("viewFlow").style.display  = (!funds && !width) ? "" : "none";
+  $("viewWidth").style.display = width ? "" : "none";
   $("tabFunds").classList.toggle("active", funds);
-  $("tabFlow").classList.toggle("active", !funds);
-  if(!funds){
-    window.scrollTo(0,0);
+  $("tabFlow").classList.toggle("active", !funds && !width);
+  $("tabWidth").classList.toggle("active", width);
+  window.scrollTo(0,0);
+  if(width){
+    widthLoad(false);
+    const c = echarts.getInstanceByDom($("wdChart")); if(c) c.resize();
+  } else if(!funds){
     flowLoad(false);
   } else {
     document.querySelectorAll("#viewFunds .chart").forEach(el=>{ const c = echarts.getInstanceByDom(el); if(c) c.resize(); });
