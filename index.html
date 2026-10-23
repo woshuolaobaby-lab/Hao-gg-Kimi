@@ -226,16 +226,6 @@
   </div>
 
   <div class="panel" style="margin-bottom:14px">
-    <h3>📅 信号追踪 · 准确率回看<small>每天自动把买入/卖出信号+当时净值存档(只存在你自己浏览器，不上传) · 信号满5/20/60/90天后对比最新净值算胜率 · 满90天=你要的"3个月预判准确率"</small></h3>
-    <div id="sigTrackGrid"><span style="color:#8b949e">加载中…</span></div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px">
-    <h3>🎯 预埋预判 · 准确率累计<small>预判"即将金叉/死叉"后，下一个交易日自动验证是否兑现，逐次累计 · 数据只存在你自己浏览器 · 存满1个月后点底部按钮导出，发给Kimi复盘检查</small></h3>
-    <div id="predStatGrid"><span style="color:#8b949e">加载中…</span></div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px">
     <h3>🔥 连涨信号<small>净值连续上涨≥2天(交易日)的基金 · 第3天继续涨会自动叠成"连涨3天"，以此类推 · 按连涨天数排序 · 连涨≠追涨信号，高位连涨要防回撤</small></h3>
     <div id="streakGrid"><span style="color:#8b949e">加载中…</span></div>
   </div>
@@ -448,25 +438,7 @@ function calcBOLL(vals){
 </script>
 <script>
 "use strict";
-/* ================= 预判记录（localStorage 持久化，逻辑同 fund.py，修复同日重复计数） ================= */
-const PRED_KEY = "fund_prediction_log";
-function loadPred(){
-  try{
-    const d = JSON.parse(localStorage.getItem(PRED_KEY));
-    if(d && d.记录 && d.统计){
-      /* 一次性修复：周末数据未更新导致的误判（2026-07-26前的统计作废，并清除无数据日期的旧记录） */
-      if(!d._fix20260726){
-        d.统计 = {"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}};
-        Object.keys(d.记录).forEach(k=>{ if(!d.记录[k].数据日期) delete d.记录[k]; });
-        d._fix20260726 = true;
-      }
-      if(!d.明细) d.明细 = []; /* 每次验证的流水：{date,code,name,预判,结果,发出} */
-      return d;
-    }
-  }catch(e){}
-  return {记录:{}, 统计:{"即将金叉":{正确:0,失误:0,总计:0}, "即将死叉":{正确:0,失误:0,总计:0}}, 明细:[], _fix20260726:true};
-}
-/* localStorage 安全写入：满了先删可自动重取的缓存，再删最旧信号档案，最后才放弃 */
+/* ================= localStorage 安全写入 ================= */
 let STORE_FULL = false;
 function safeSet(key, val){
   try{ localStorage.setItem(key, val); return true; }catch(e){}
@@ -475,46 +447,15 @@ function safeSet(key, val){
     localStorage.removeItem("fund_index_val");
     localStorage.removeItem("fund_nfp_v1");
     localStorage.setItem(key, val); return true;
-  }catch(e){}
-  /* 第二轮：信号档案只留最近90天，再试 */
-  try{
-    const ks = Object.keys(SIG_LOG||{}).sort();
-    if(ks.length>90){ ks.slice(0, ks.length-90).forEach(k=>delete SIG_LOG[k]); localStorage.setItem("fund_sig_log_v1", JSON.stringify(SIG_LOG)); }
-    localStorage.setItem(key, val); return true;
   }catch(e){ STORE_FULL = true; return false; }
 }
-function savePred(d){ safeSet(PRED_KEY, JSON.stringify(d)); }
-
-/* 存储占用统计 + 一键清理（保留：信号档案/预埋统计/仓位/元数据，删掉可自动重取的缓存和旧版本残留） */
-function storageUsage(){
-  let total=0;
-  try{
-    for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i), v=localStorage.getItem(k)||"";
-      total += (k.length+v.length)*2/1024; /* 浏览器按UTF-16计，每字符约2字节 */
-    }
-  }catch(e){}
-  return total;
-}
-function cleanStorage(){
-  const keep = ["fund_sig_log_v1","fund_prediction_log","fund_sig_meta","fund_holdings"];
-  const del = [];
-  try{
-    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(!keep.includes(k)) del.push(k); }
-    del.forEach(k=>localStorage.removeItem(k));
-  }catch(e){}
-  STORE_FULL = false;
-  renderPredStat();
-  alert("清理完成！删掉了 "+del.length+" 项缓存数据。\n信号档案、预埋统计、我的仓位都保留着。\n点右上角「刷新数据」就恢复正常存档了。");
-}
-/* 数据是否推进到了下一个交易日（周末/节假日净值不更新，跳过验证，避免误判） */
-function dataHasAdvanced(rec, 当前数据日期){
-  if(!rec.数据日期) return true; /* 旧记录没有数据日期，按原逻辑验证 */
-  return 当前数据日期 > rec.数据日期;
-}
+/* 信号追踪/预埋预判已下线：一次性清掉旧存档，释放浏览器存储 */
+try{ localStorage.removeItem("fund_prediction_log"); }catch(e){}
+try{ localStorage.removeItem("fund_sig_log_v1"); }catch(e){}
+try{ localStorage.removeItem("fund_sig_meta"); }catch(e){}
 
 /* ================= 核心分析（与 fund.py 分析基金 完全一致） ================= */
-function analyzeFund(code, vals, ts, predData, marketFactor, profile){
+function analyzeFund(code, vals, ts, marketFactor, profile){
   const 当前净值 = vals[vals.length-1], 昨日净值 = vals[vals.length-2], 前日净值 = vals[vals.length-3];
   const 日涨跌 = (当前净值-昨日净值)/昨日净值*100;
   const 昨日涨跌 = (昨日净值-前日净值)/前日净值*100;
@@ -573,29 +514,8 @@ function analyzeFund(code, vals, ts, predData, marketFactor, profile){
     if(预计<=2){ 预判死叉=true; 预判死叉天数=Math.round(预计*10)/10; }
   }
 
-  let 验证结果="", 预判准确率="";
-  const today = new Date();
-  const todayStr = today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-"+String(today.getDate()).padStart(2,"0");
-  const rec = predData.记录[code];
-  const 数据日期 = ts[ts.length-1]; /* 净值数据的最后一天（时间戳），用于判断数据是否真的更新了 */
-  if(rec && rec.date < todayStr && dataHasAdvanced(rec, 数据日期)){
-    const key = rec.预判;
-    const st = predData.统计[key];
-    const hit = (key==="即将金叉" && 金叉) || (key==="即将死叉" && 死叉);
-    st.总计++;
-    if(hit){ st.正确++; 验证结果 = `预判正确(${key==="即将金叉"?"金叉":"死叉"}已确认)`; }
-    else { st.失误++; 验证结果 = `预判失误(未形成${key==="即将金叉"?"金叉":"死叉"})`; }
-    预判准确率 = `${key}准确率 ${(st.正确/st.总计*100).toFixed(0)}%(${st.正确}/${st.总计})`;
-    predData.明细 = predData.明细 || [];
-    predData.明细.push({date:todayStr, code, name:profile.name, 预判:key, 结果:hit?"正确":"失误", 发出:rec.date});
-    if(predData.明细.length>400) predData.明细 = predData.明细.slice(-400);
-    delete predData.记录[code];
-  }
-  const isQDII = profile.sector==="海外"; /* QDII净值滞后1天，预埋预判经实测准确率太低(25%)，海外基金不发预埋 */
-  if(!isQDII && 预判金叉) predData.记录[code] = {date:todayStr, 预判:"即将金叉", 均线差:均线差, 数据日期:数据日期};
-  else if(!isQDII && 预判死叉) predData.记录[code] = {date:todayStr, 预判:"即将死叉", 均线差:均线差, 数据日期:数据日期};
-
   /* 加权评分 */
+  const isQDII = profile.sector==="海外"; /* QDII净值滞后1天，金叉预判不可靠，海外基金不发预埋 */
   let 买入评分=0, 卖出评分=0;
   if(金叉){ let w=3.0; if(macd.金叉) w+=2.0; else if(macd.状态==="零轴上") w+=1.0; else w*=0.7; 买入评分+=w; }
   if(死叉){ let w=3.0; if(macd.死叉) w+=2.0; else if(macd.状态==="零轴下") w+=1.0; else w*=0.7; 卖出评分+=w; }
@@ -766,7 +686,7 @@ function analyzeFund(code, vals, ts, predData, marketFactor, profile){
     RSI:+RSI.toFixed(1), 距高点:+距高点.toFixed(1), 距低点:+距低点.toFixed(1),
     买入评分:+买入评分.toFixed(1), 卖出评分:+卖出评分.toFixed(1), 净评分,
     预判金叉, 预判金叉天数, 预判死叉, 预判死叉天数,
-    验证结果, 预判准确率, 仓位建议, 建议, 策略,
+    仓位建议, 建议, 策略,
     估值百分位, 估值因子, 估值显示, _指数代码:指数代码,
     资金趋势, 资金趋势色, _etf:etf,
     MA120:+MA120.toFixed(4), MA250:+MA250.toFixed(4),
@@ -923,61 +843,6 @@ function renderMacro(){
   h += `</div>`;
   g.innerHTML = h;
 }
-/* ======== 信号追踪：每天存档买入/卖出信号+净值，5/20/60/90天后算胜率（3个月预判准确率） ======== */
-let SIG_LOG = (()=>{ try{ return JSON.parse(localStorage.getItem("fund_sig_log_v1")||"{}"); }catch(e){ return {}; } })();
-function todayStr(){ const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
-function trackSignals(){
-  try{
-    /* 数据日期守卫：净值数据没推进（周末/节假日打开面板）就不重复存档，避免垃圾数据污染胜率 */
-    const ref = RESULTS.find(r=>r.代码==="510300" && !r.error) || RESULTS.find(r=>!r.error);
-    const dataDay = ref && ref._ts ? ref._ts[ref._ts.length-1] : null;
-    let meta = {};
-    try{ meta = JSON.parse(localStorage.getItem("fund_sig_meta")||"{}"); }catch(e){}
-    if(dataDay && meta.lastDataDay===dataDay) return; /* 数据没更新，跳过 */
-    const buys = ["强烈买入","买入","加仓","补仓","预埋"], sells = ["清仓","减仓","止盈"];
-    const snap = RESULTS.filter(r=>buys.includes(r.建议)||sells.includes(r.建议))
-      .map(r=>({c:r.代码, n:r.名称, a:r.建议, v:r.净值, side:buys.includes(r.建议)?"B":"S"}));
-    if(snap.length) SIG_LOG[todayStr()] = snap;
-    const keys = Object.keys(SIG_LOG).sort();
-    while(keys.length>130){ delete SIG_LOG[keys.shift()]; } /* 只留最近约4个月 */
-    safeSet("fund_sig_log_v1", JSON.stringify(SIG_LOG));
-    if(dataDay){ meta.lastDataDay = dataDay; safeSet("fund_sig_meta", JSON.stringify(meta)); }
-  }catch(e){}
-}
-function renderSigTrack(){
-  const g = $("sigTrackGrid"); if(!g) return;
-  const dates = Object.keys(SIG_LOG||{}).sort();
-  if(!dates.length){ g.innerHTML = `<span style="color:#8b949e">从今天起自动累积信号档案（只存在你自己浏览器）。首批信号满5天后开始显示胜率，满90天显示"3个月预判准确率"。</span>`; return; }
-  const nowV = {}; RESULTS.forEach(r=>{ nowV[r.代码] = r.净值; });
-  const t0 = new Date(todayStr()).getTime(), dayMs = 864e5;
-  const ageOf = d => Math.floor((t0 - new Date(d).getTime())/dayMs);
-  let chips = "";
-  [[5,"满5天"],[20,"满20天"],[60,"满60天"],[90,"满90天 · 3个月预判"]].forEach(([days,label])=>{
-    let bHit=0,bN=0,bChg=0,sHit=0,sN=0;
-    dates.forEach(d=>{
-      if(ageOf(d)<days) return;
-      (SIG_LOG[d]||[]).forEach(e=>{
-        const cur = nowV[e.c]; if(cur==null || !e.v) return;
-        const chg = (cur-e.v)/e.v*100;
-        if(e.side==="B"){ bN++; bChg+=chg; if(chg>0) bHit++; } else { sN++; if(chg<0) sHit++; }
-      });
-    });
-    if(!bN && !sN) return;
-    chips += `<div class="sigt-chip">📌 ${label}` +
-      (bN ? `<br>买入信号 ${bN}只 · 胜率 <b style="color:${bHit/bN>=0.5?"#ff4d4f":"#00c853"}">${Math.round(bHit/bN*100)}%</b> · 平均 <span class="${bChg>=0?"up":"down"}">${bChg/bN>=0?"+":""}${(bChg/bN).toFixed(1)}%</span>` : "") +
-      (sN ? `<br>卖出信号 ${sN}只 · 正确率 <b style="color:${sHit/sN>=0.5?"#ff4d4f":"#00c853"}">${Math.round(sHit/sN*100)}%</b>` : "") + `</div>`;
-  });
-  const rows = dates.slice(-8).reverse().map(d=>{
-    const list = SIG_LOG[d]||[];
-    const b = list.filter(e=>e.side==="B"), s = list.filter(e=>e.side==="S");
-    const bChg = b.map(e=>nowV[e.c]!=null ? (nowV[e.c]-e.v)/e.v*100 : null).filter(x=>x!=null);
-    const avg = bChg.length ? bChg.reduce((a,x)=>a+x,0)/bChg.length : null;
-    const age = ageOf(d);
-    return `<div class="news-item"><span class="news-time">${d.slice(5)}</span><span style="flex:1;color:#c9d1d9">买入 ${b.length} 只 · 卖出 ${s.length} 只${b.length?` <span style="color:#8b949e">（${b.slice(0,4).map(e=>e.n).join("、")}${b.length>4?"…":""}）</span>`:""}</span><span style="color:#8b949e;font-size:12px">${age>0?age+"天前":"今天"}</span>${avg!=null?`<span class="${avg>=0?"up":"down"}" style="font-size:12px">买入信号至今 ${avg>=0?"+":""}${avg.toFixed(1)}%</span>`:""}</div>`;
-  }).join("");
-  g.innerHTML = (chips || `<span style="color:#8b949e">信号档案已累积 ${dates.length} 天，最早一批满5天后开始显示胜率。</span>`) + (rows ? `<div style="margin-top:6px">${rows}</div>` : "");
-}
-
 /* ======== 连涨信号：净值连续上涨≥2天（第3天续涨自动叠成连涨3天，以此类推） ======== */
 function renderStreak(){
   const g = $("streakGrid"); if(!g) return;
@@ -1003,53 +868,6 @@ function renderStreak(){
       <div class="tr" style="color:${hot}">🔥 连涨${s.streak}天<span style="font-weight:400;font-size:12px;color:#8b949e;margin-left:5px">${s.streak}日累计 +${s.cum}%</span></div>
       <div style="font-size:12px;color:#8b949e;margin-top:4px">今日 ${s.today>0?"+":""}${s.today}% · 信号:${s.建议}</div>${warn}</div>`;
   }).join("") + `</div>` + (list.length>24 ? `<div style="font-size:12px;color:#8b949e;margin-top:6px">共 ${list.length} 只连涨≥2天，只显示前24只（按连涨天数排序）</div>` : "");
-}
-
-/* ======== 预埋预判准确率面板：累计统计 + 近10次验证明细 + 导出 ======== */
-function renderPredStat(){
-  const g = $("predStatGrid"); if(!g) return;
-  const st = PRED.统计 || {};
-  const chip = key=>{
-    const s = st[key] || {正确:0,失误:0,总计:0};
-    if(!s.总计) return `<div class="sigt-chip"><b>${key}</b><br><span style="color:#8b949e">暂无验证记录</span></div>`;
-    const acc = s.正确/s.总计*100;
-    const color = acc>=60 ? "#3fb950" : acc>=40 ? "#e3b341" : "#f85149";
-    return `<div class="sigt-chip"><b>${key}</b><br>验证 ${s.总计} 次 · 准确率 <b style="color:${color}">${acc.toFixed(0)}%</b><br><span style="color:#8b949e">正确 ${s.正确} · 失误 ${s.失误}</span></div>`;
-  };
-  const pending = Object.keys(PRED.记录||{}).length;
-  const detail = (PRED.明细||[]).slice(-10).reverse().map(d=>
-    `<div class="news-item"><span class="news-time">${d.date.slice(5)}</span><span style="flex:1;color:#c9d1d9">${d.name||d.code} <span style="color:#8b949e">${d.预判}（${d.发出?d.发出.slice(5)+"发出":""}）</span></span><span style="color:${d.结果==="正确"?"#3fb950":"#f85149"};font-size:12px">${d.结果==="正确"?"✓ 兑现":"✗ 未兑现"}</span></div>`).join("");
-  g.innerHTML = `<div style="margin-bottom:6px">${chip("即将金叉")}${chip("即将死叉")}<div class="sigt-chip"><b>待验证</b><br><span style="color:#e3b341">${pending} 只</span><br><span style="color:#8b949e">已发出预判，等下个交易日</span></div></div>`
-    + (detail || `<span style="color:#8b949e">验证明细会从第一次兑现/失误开始累计。</span>`)
-    + `<div style="margin-top:10px"><button class="btn" style="padding:5px 14px;font-size:12px" onclick="exportStats()">📥 导出信号+预埋数据（发给Kimi检查）</button> <button class="btn" style="padding:5px 14px;font-size:12px;background:#1f6feb" onclick="exportFundList()">📥 导出基金清单</button></div>`
-    + (()=>{ const kb = storageUsage(); const pct = Math.min(100, kb/5120*100); const c = kb>4000 ? "#f85149" : kb>2500 ? "#e3b341" : "#3fb950";
-      return `<div style="margin-top:8px;font-size:12px;color:#8b949e">浏览器存储占用 <b style="color:${c}">${kb.toFixed(0)}KB</b> / 约5120KB <span class="vtrack" style="display:inline-block;width:120px;vertical-align:middle;margin:0 4px"><span class="vfill" style="display:block;height:100%;width:${pct}%;background:${c}"></span></span> <a href="javascript:void(0)" onclick="if(confirm('清理缓存数据？信号档案、预埋统计、我的仓位都会保留，只删可自动重新下载的缓存。'))cleanStorage()" style="color:#58a6ff">🧹 清理缓存（档案保留）</a>${STORE_FULL?' <span style="color:#f85149">⚠ 存储已满，点清理即可恢复存档</span>':""}</div>`; })();
-}
-
-/* 导出工具：生成txt文件下载 */
-function downloadTxt(fname, txt){
-  const blob = new Blob(["\ufeff"+txt], {type:"text/plain;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = fname;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-}
-function exportStats(){
-  const sig = localStorage.getItem("fund_sig_log_v1")||"{}";
-  const pred = localStorage.getItem("fund_prediction_log")||"{}";
-  const txt = "基金监控面板 · 统计数据导出（发给Kimi复盘用）\n导出时间: "+new Date().toLocaleString()+"\n\n===== 一、买卖信号档案（signal追踪·胜率回看）=====\n"+sig+"\n\n===== 二、预埋预判统计（含每次验证明细）=====\n"+pred+"\n";
-  downloadTxt("面板统计数据-"+todayStr()+".txt", txt);
-}
-function exportFundList(){
-  let txt = "基金监控面板 · 全部基金清单（共"+FUNDS.length+"只）\n导出时间: "+new Date().toLocaleString()+"\n\n";
-  const bySec = {};
-  FUNDS.forEach(f=>{ (bySec[f.sector]=bySec[f.sector]||[]).push(f); });
-  Object.keys(bySec).forEach(sec=>{
-    txt += "【"+sec+"】\n";
-    bySec[sec].forEach(f=>{ txt += f.code+"  "+f.name+"（"+(f.long||"谨慎")+"）\n"; });
-    txt += "\n";
-  });
-  downloadTxt("基金清单-"+todayStr()+".txt", txt);
 }
 
 /* ======== 第二层：指数估值（真实PE/PB历史分位，数据源：蛋卷基金） ======== */
@@ -1230,40 +1048,29 @@ async function loadSB(){
     const ratioEl = $("sbRatioChart");
     let ch2 = null;
     if(ratioEl){
-      /* 盘中估算：黄色实线末端接一段橙色虚线到今天估算值 */
+      /* 盘中估算：黄线末端接一段黄色虚线到今天估算值；末尾只保留一个黄点显示最新数值，无需悬停 */
       const estData = Array(datesP.length).fill(null);
       if(est){ estData[li] = +lastR.toFixed(3); estData[li+12] = est.ratio; }
       ch2 = echarts.init(ratioEl);
       ch2.setOption({
         backgroundColor:"transparent",
         grid:{left:45,right:15,top:22,bottom:18},
-        tooltip:{trigger:"axis",confine:true,hideDelay:200,enterable:false,transitionDuration:0.1,backgroundColor:"#161b22",borderColor:"#30363d",textStyle:{color:"#c9d1d9"},
-          position:(pt,pr,dom,rc,sz)=>[sz.viewSize[0]-sz.contentSize[0]-12, 6], /* 固定在图内右上角，边缘不闪不挤 */
-          axisPointer:{type:"line",snap:true,lineStyle:{color:"#e3b341"},label:{show:true,backgroundColor:"#30363d",color:"#c9d1d9"}},
-          formatter: ps => {
-            if(!ps || !ps.length) return "";
-            const r = ps.find(q=>q.seriesName==="股债比" && q.data!=null);
-            const e = ps.find(q=>q.seriesName==="今日盘中估算" && q.data!=null);
-            if(!r && !e) return "";
-            let h = r ? `${r.axisValue}<br>股债比 <b>${(+r.data).toFixed(3)}</b>` : "";
-            if(e && e.dataIndex>li) h += (h?"<br>":"") + `📈 今日盘中估算 <b>${(+e.data).toFixed(3)}</b>`;
-            return h;
-          }},
+        tooltip:{show:false}, /* 不需要鼠标悬停，最新数值直接印在黄点上 */
         xAxis:{type:"category",data:datesP,boundaryGap:false,axisLabel:{color:"#8b949e",fontSize:10,showMaxLabel:true},axisLine:{lineStyle:{color:"#30363d"}}},
         yAxis:{type:"value",min:0.6,max:1.5,name:"股债比",nameTextStyle:{color:"#8b949e",fontSize:10},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
         series:[{name:"股债比",type:"line",data:sRP.map(v=>v==null?null:+v.toFixed(3)),showSymbol:false,sampling:"lttb",
           lineStyle:{width:1.4,color:"#e3b341"},itemStyle:{color:"#e3b341"},
-          markPoint:{data:[{coord:[li, +lastR.toFixed(3)]}],symbol:"circle",symbolSize:7,itemStyle:{color:"#e3b341"},
-            label:{show:true,position:"left",distance:6,color:"#e3b341",fontSize:11,fontWeight:600,formatter:lastD.slice(5)+" · "+lastR.toFixed(3)}},
+          markPoint:{data:est?[]:[{coord:[li, +lastR.toFixed(3)]}],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
+            label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:"最新 "+lastR.toFixed(3)+"（"+lastD.slice(5)+"净值）"}},
           markArea:{itemStyle:{color:"rgba(63,185,80,0.12)"},
             data:[[{yAxis:0.6,label:{show:true,position:"insideBottomLeft",color:"#3fb950",fontSize:11,formatter:"历史大底区 ≤0.85"}},{yAxis:0.85}]]},
           markLine:{symbol:"none",data:[
             {yAxis:0.85,lineStyle:{color:"#3fb950",type:"dashed"},label:{show:false}},
             {yAxis:1.25,lineStyle:{color:"#f85149",type:"dashed"},label:{show:true,position:"insideEndTop",color:"#f85149",fontSize:10,formatter:"过热区 ≥1.25"}}
           ]}},
-          {name:"今日盘中估算",type:"line",data:estData,showSymbol:false,lineStyle:{width:1.6,type:"dashed",color:"#ffa657"},itemStyle:{color:"#ffa657"},z:3,
-           markPoint:{data:est?[{coord:[li+12, est.ratio]}]:[],symbol:"circle",symbolSize:7,itemStyle:{color:"#ffa657"},
-             label:{show:true,position:"top",distance:6,color:"#ffa657",fontSize:11,fontWeight:600,formatter:"盘中≈"+(est?est.ratio.toFixed(3):"")}}}
+          {name:"今日盘中估算",type:"line",data:estData,showSymbol:false,lineStyle:{width:1.6,type:"dashed",color:"#e3b341"},itemStyle:{color:"#e3b341"},z:3,
+           markPoint:{data:est?[{coord:[li+12, est.ratio]}]:[],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
+             label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:est?("最新 ≈"+est.ratio.toFixed(3)+"（盘中估算）"):""}}}
         ]
       });
     }
@@ -1298,7 +1105,7 @@ async function loadETFQuotes(){
 "use strict";
 /* ================= 渲染 ================= */
 const $ = id => document.getElementById(id);
-let RESULTS = [], FAILED = [], PRED = loadPred();
+let RESULTS = [], FAILED = [];
 let sortKey = "净评分", sortDir = -1;
 
 const cls = v => v>0 ? "up" : v<0 ? "down" : "flat";
@@ -1545,7 +1352,7 @@ function renderTable(){
     if(fa && r.建议!==fa) return false;
     if(fl && r.长期!==fl) return false;
     if(q && !(r.名称.toLowerCase().includes(q) || r.代码.includes(q))) return false;
-    if(onlySignal && ["持有","观望"].includes(r.建议) && !r.预判金叉 && !r.验证结果) return false;
+    if(onlySignal && ["持有","观望"].includes(r.建议) && !r.预判金叉) return false;
     return true;
   });
   rows.sort((a,b)=>{
@@ -1602,7 +1409,6 @@ window.openDrawer = function(code){
   const r = RESULTS.find(x=>x.代码===code);
   if(!r) return;
   const d = $("drawer");
-  const verifyLine = r.验证结果 ? `<div class="${r.验证结果.includes("正确")?"verify-ok":"verify-bad"}">昨日预判验证: ${r.验证结果}${r.预判准确率? " · "+r.预判准确率:""}</div>` : "";
   const predLine = r.预判金叉 ? `<div style="color:#e3b341">预判: 即将金叉（约${r.预判金叉天数}天内）→ 今日15:00前可小额预埋，或明天开盘观察</div>` : r.预判死叉 ? `<div style="color:#e3b341">预判: 即将死叉（约${r.预判死叉天数}天内）→ 注意风险</div>` : "";
   d.innerHTML = `
     <button class="close" onclick="closeDrawer()">✕</button>
@@ -1614,7 +1420,7 @@ window.openDrawer = function(code){
       ${r.资金趋势?`<div style="margin-top:4px">资金趋势: <b style="color:${r.资金趋势色}">${r.资金趋势}</b>${r.资金趋势==="⚠诱多嫌疑"?" — 放量上涨但主力在卖，小心假突破":r.资金趋势==="放量突破"?" — 放量+资金流入+创新高，真突破概率大":r.资金趋势==="缩量回调"?" — 缩量下跌+资金未流出，属健康回调":""}</div>`:""}
       ${r.黄金坑?`<div style="color:#ffa657;margin-top:4px">🕳 黄金坑识别: 长期趋势未破 + 深度回调${r.回撤120}% + 估值${r.估值显示}%不贵 — 坑底机会区</div>`:""}
       ${r.顶部风险?`<div style="color:#f85149;margin-top:4px">🔺 顶部风险识别: 估值${r.估值显示}%极贵 + 动能衰竭/资金出逃 — 注意止盈</div>`:""}
-      ${predLine}${verifyLine}
+      ${predLine}
     </div>
     <div id="dchart"></div>
     <div class="kv">
@@ -1960,7 +1766,7 @@ window.showSector = function(sector){
 "use strict";
 /* ================= 主流程 ================= */
 function renderAll(){
-  [renderCards, renderMatrix, renderSector, renderTopList, renderTable, renderEnv, renderVal, renderETF, renderRadar, renderHoldings, renderSigTrack, renderPredStat, renderStreak].forEach(fn=>{
+  [renderCards, renderMatrix, renderSector, renderTopList, renderTable, renderEnv, renderVal, renderETF, renderRadar, renderHoldings, renderStreak].forEach(fn=>{
     try{ fn(); }catch(e){ console.error("渲染出错:", e); } /* 单个面板出错不影响其他面板 */
   });
 }
@@ -2026,7 +1832,7 @@ async function run(){
       $("loadStatus").textContent = `加载基金 ${done}/${FUNDS.length}`;
       if(d.error){ FAILED.push({code, 名称:profileMap[code]?.name||code, error:d.error}); continue; }
       dataMap[code] = d;
-      RESULTS.push(analyzeFund(code, d.vals, d.ts, PRED, env.加成, profileMap[code]));
+      RESULTS.push(analyzeFund(code, d.vals, d.ts, env.加成, profileMap[code]));
       if(done % 8 === 0){ renderCards(); renderTable(); } /* 边加载边显示 */
     }
   }
@@ -2045,22 +1851,20 @@ async function run(){
         if(!d.error){
           FAILED = FAILED.filter(f=>f.code!==code);
           dataMap[code] = d;
-          RESULTS.push(analyzeFund(code, d.vals, d.ts, PRED, env.加成, profileMap[code]));
+          RESULTS.push(analyzeFund(code, d.vals, d.ts, env.加成, profileMap[code]));
           renderCards(); renderTable();
         }
       }
     }
     await Promise.all(Array.from({length:3}, worker2));
   }
-  /* 收尾三件事各自独立保护：任何一个出错都不许卡住整个页面 */
-  try{ savePred(PRED); }catch(e){}
-  try{ trackSignals(); }catch(e){} /* 存档今日信号，供胜率回看 */
+  /* 渲染单独保护：出错不许卡住整个页面 */
   try{ renderAll(); }catch(e){ console.error("renderAll出错：", e); }
 
   $("pbar").style.width = "100%";
   const now = new Date();
   $("updateTime").textContent = "更新于 " + now.toLocaleString("zh-CN", {hour12:false});
-  $("loadStatus").textContent = (FAILED.length ? `完成（${FAILED.length}只失败）` : "加载完成") + (STORE_FULL ? " · ⚠浏览器存储已满，信号档案未保存" : "");
+  $("loadStatus").textContent = (FAILED.length ? `完成（${FAILED.length}只失败）` : "加载完成") + (STORE_FULL ? " · ⚠浏览器存储已满" : "");
   btn.disabled = false; btn.textContent = "刷新数据";
   setTimeout(()=>{ $("pbar").style.width = "0%"; }, 1200);
 }
