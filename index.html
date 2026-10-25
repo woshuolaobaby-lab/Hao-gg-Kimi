@@ -346,9 +346,7 @@
   </div>
 
   <div class="foot">
-    <span id="wdUpdated"></span> <button class="btn" onclick="widthLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button>
-    <button class="btn" onclick="exportWidth()" style="padding:5px 16px;font-size:12px;background:#1f6feb">📥 导出复盘数据（发给Kimi）</button><br>
-    <span id="wdStore" style="color:#3fb950"></span><br>
+    <span id="wdUpdated"></span> <button class="btn" onclick="widthLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button><br>
     数据来源：东方财富全市场个股行情实时计算（沪深A股，盘中实时）· 本面板仅供参考，不构成投资建议
   </div>
 </div>
@@ -1080,10 +1078,7 @@ async function loadSB(){
       yAxis:{type:"value",name:"2012年=1",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e"},splitLine:{lineStyle:{color:"#21262d"}}},
       series:[
         {name:"沪深300全收益",type:"line",data:sAP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#ff7b72"},itemStyle:{color:"#ff7b72"},
-         markPoint:{data:marks.concat([{coord:[li, sA[li]],symbol:"circle",symbolSize:9,itemStyle:{color:"#e3b341"},
-           label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,
-             formatter:est?est.ratio.toFixed(2):lastR.toFixed(2)}}]),
-           symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
+         markPoint:{data:marks,symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
         {name:"二级债基",type:"line",data:sBP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#58a6ff"},itemStyle:{color:"#58a6ff"}}
       ]
     });
@@ -1955,56 +1950,6 @@ let FLOW_CODES = {};
 /* ======== 市场宽度：全A涨跌家数×成交额 → 阿姆斯指标(TRIN) · 量价背离诊断 ======== */
 /* 判据（按你给的9/21案例）：家数倍数 R1 ÷ 成交额倍数 R2 = TRIN。
    R1大但TRIN>1 → 上涨家数虚胖、成交额没跟上 → 权重放量出货、小票补涨 → 宽度随时崩塌 */
-/* 取数双通道：fetch被浏览器/网络拦（你那边报的Failed to fetch）就自动换script标签通道，绕开跨域限制 */
-function wdJsonp(url){
-  return new Promise((resolve,reject)=>{
-    const cb = "wdCb" + Math.random().toString(36).slice(2);
-    const s = document.createElement("script");
-    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 12000);
-    function cleanup(){ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } s.remove(); }
-    window[cb] = j => { clearTimeout(timer); cleanup(); resolve(j); };
-    s.onerror = ()=>{ clearTimeout(timer); cleanup(); reject(new Error("script error")); };
-    s.src = url + "&cb=" + cb;
-    document.head.appendChild(s);
-  });
-}
-/* 取数通道自动探测：你那边"Failed to fetch/script error"说明某个通道被浏览器安全拦截或网络设备吞了。
-   现在按顺序试 5个东财节点×2种方式（fetch→script标签），哪个通用就一直用哪个 */
-const WD_HOSTS = ["https://push2delay.eastmoney.com","https://push2.eastmoney.com","https://1.push2.eastmoney.com","https://33.push2.eastmoney.com","https://1.push2delay.eastmoney.com"];
-let WD_CH = null;
-async function wdChan(path){
-  if(WD_CH) return WD_CH(path);
-  for(const h of WD_HOSTS){ try{ const j = await flowJson(h+path); if(j && j.data){ WD_CH = u=>flowJson(h+u); return j; } }catch(e){} }
-  for(const h of WD_HOSTS){ try{ const j = await wdJsonp(h+path); if(j && j.data){ WD_CH = u=>wdJsonp(h+u); return j; } }catch(e){} }
-  throw new Error("10条取数通道全被拦截——试试：关掉浏览器「安全网址拦截/广告拦截」插件，或换Edge/Chrome打开");
-}
-/* 存档写入：存不下（浏览器存储满）就自动砍掉最旧的一半再试，保证今天的数据一定存得下 */
-function wdSave(h){
-  if(safeSet(WD_KEY, JSON.stringify(h))) return;
-  const ks = Object.keys(h).sort();
-  ks.slice(0, Math.ceil(ks.length/2)).forEach(k=>delete h[k]);
-  safeSet(WD_KEY, JSON.stringify(h));
-}
-function storageKB(){ let t=0; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); t+=(k.length+(localStorage.getItem(k)||"").length)*2/1024; } }catch(e){} return t; }
-/* 导出复盘数据：攒2-3周/2-3个月后发给Kimi，逐条核对哪天的诊断对、哪天错 */
-function downloadTxt(fname, txt){
-  const blob = new Blob(["\ufeff"+txt], {type:"text/plain;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = fname;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-}
-function exportWidth(){
-  const h = wdRead(), days = Object.keys(h).sort();
-  let txt = "基金监控面板 · 市场宽度复盘数据（发给Kimi复盘用）\n导出时间: "+new Date().toLocaleString()+"\n";
-  txt += "每天一档：日期 | 涨/跌/平盘 | 涨停/跌停 | 上涨成交额/下跌成交额(亿) | 红盘率% | TRIN | 当天诊断\n\n";
-  days.forEach(d=>{ const r=h[d];
-    txt += d+" | "+r.adv+"/"+r.dec+"/"+r.flat+" | 涨停"+r.up+"/跌停"+r.dn+" | "+r.aA+"/"+r.dA+"亿 | 红盘率"+r.bp+"% | TRIN "+r.trin+" | "+(r.v||"")+"\n"; });
-  if(WD_SNAP) txt += "\n最新完整快照: "+JSON.stringify(WD_SNAP)+"\n";
-  if(!days.length) txt += "（还没有存档，先打开一次市场宽度页攒数据）\n";
-  downloadTxt("市场宽度复盘-"+bjDateStr(bjNow())+".txt", txt);
-}
-
 const WD_KEY = "fund_breadth_v1";
 let WD_LOADING = false, WD_SNAP = null;
 function wdRead(){ try{ return JSON.parse(localStorage.getItem(WD_KEY)||"{}"); }catch(e){ return {}; } }
@@ -2015,9 +1960,9 @@ async function widthLoad(force){
   WD_LOADING = true;
   $("wdBadge").textContent = "统计中…";
   try{
-    const FS = encodeURIComponent("m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"); /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所）。参数全编码，防止被安全软件吞请求 */
+    const FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"; /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所） */
     const FIELDS = "f12,f3,f6,f124";
-    const first = await wdChan(`/api/qt/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+    const first = await flowJson(`${FLOW_BASE}/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
     const total = (first.data && first.data.total) || 0;
     const rows0 = (first.data && first.data.diff) || [];
     if(!total || !rows0.length) throw new Error("接口无数据");
@@ -2028,11 +1973,10 @@ async function widthLoad(force){
     await Promise.all(Array.from({length:4}, async ()=>{
       while(pn <= pages){
         const cur = pn++;
-        const pull = ()=>wdChan(`/api/qt/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
-        try{ const j = await pull(); ((j.data && j.data.diff) || []).forEach(r=>rows.push(r)); }
-        catch(e){ /* 失败自动重试一次，防止少一页数据导致家数算错 */
-          try{ const j = await pull(); ((j.data && j.data.diff) || []).forEach(r=>rows.push(r)); }catch(e2){}
-        }
+        try{
+          const j = await flowJson(`${FLOW_BASE}/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+          ((j.data && j.data.diff) || []).forEach(r=>rows.push(r));
+        }catch(e){}
       }
     }));
     let adv=0, dec=0, flat=0, advAmt=0, decAmt=0, limitUp=0, limitDown=0, ts=0;
@@ -2057,7 +2001,11 @@ async function widthLoad(force){
       r1:+r1.toFixed(2), r2:+r2.toFixed(2), trin:+trin.toFixed(2), breadth:+breadth.toFixed(1),
       decAmtPct:+decAmtPct.toFixed(1), ts, _at:Date.now() };
     WD_SNAP = snap;
-    wdRender(snap); /* 存档在渲染里做：连同当天的诊断结论一起存，方便以后复盘哪天判对哪天判错 */
+    /* 每天一档自动存档（当天反复打开会覆盖，留下当天最后一次） */
+    try{ const h = wdRead(); h[d] = {adv,dec,flat,up:limitUp,dn:limitDown,aA:+snap.advAmt.toFixed(0),dA:+snap.decAmt.toFixed(0),trin:snap.trin,bp:snap.breadth};
+      const ks = Object.keys(h).sort(); while(ks.length>250) delete h[ks.shift()];
+      safeSet(WD_KEY, JSON.stringify(h)); }catch(e){}
+    wdRender(snap);
   }catch(e){
     $("wdBadge").textContent = "获取失败";
     $("wdRatio").innerHTML = `<span style="color:#f85149">全市场数据获取失败（${e.message||e}），点右下角「手动刷新」重试</span>`;
@@ -2110,15 +2058,6 @@ function wdRender(s){
      <div style="margin-top:10px;padding:10px 12px;background:#161b22;border-left:3px solid ${color};border-radius:6px;line-height:1.9">${verdict}</div>`;
   $("wdDate").textContent = `${s.d} ${s.ts?fmtT(s.ts):""} · 沪深A股 ${s.adv+s.dec+s.flat} 只在交易（停牌未计入）`;
   $("wdUpdated").textContent = "更新于 " + new Date().toLocaleString("zh-CN",{hour12:false});
-  /* —— 每天一档自动存档（含当天诊断结论，供以后复盘）；写不进就砍最旧的一半 —— */
-  try{
-    const ah = wdRead();
-    ah[s.d] = {adv:s.adv,dec:s.dec,flat:s.flat,up:s.limitUp,dn:s.limitDown,aA:+s.advAmt.toFixed(0),dA:+s.decAmt.toFixed(0),trin:s.trin,bp:s.breadth,v:badge};
-    const ks = Object.keys(ah).sort(); while(ks.length>250) delete ah[ks.shift()];
-    wdSave(ah);
-  }catch(e){}
-  const kb = storageKB();
-  $("wdStore").textContent = `浏览器存档占用 ${kb.toFixed(0)}KB / 约5120KB · 每天只占约0.1KB，放心攒 · 真存满时会自动砍掉最旧的一半，今天的数据一定存得下`;
   /* —— 资金去向条 —— */
   const tot = s.advAmt + s.decAmt, aPct = s.advAmt/tot*100;
   $("wdMoney").innerHTML =
