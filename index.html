@@ -212,8 +212,6 @@
     <h3>⚖️ 股债性价比 · 沪深300全收益 vs 二级债基<small>红线=股 蓝线=债 · 红线跌破蓝线≠见底 · 跌到蓝线的75~85%=跌透=历史大底（2013/2016/2018/2022/2024五次全灵验，绿📍标记） · 下方小图=股债比，≤0.85进大底区 · 数据:510300累计净值≈沪深300全收益 + 110008易方达稳健收益(老牌二级债基近似债基指数) · 2012年至今 · 仅参考不构成建议</small></h3>
     <div id="sbChips" style="margin-bottom:6px"><span style="color:#8b949e">加载中…</span></div>
     <div id="sbChart" style="height:300px"></div>
-    <div style="font-size:12px;color:#8b949e;margin:6px 0 2px">📏 股债比走势（红线÷蓝线）——绿色区域=历史大底区，黄线跌进绿区=十年一遇的机会</div>
-    <div id="sbRatioChart" style="height:230px"></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -346,7 +344,9 @@
   </div>
 
   <div class="foot">
-    <span id="wdUpdated"></span> <button class="btn" onclick="widthLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button><br>
+    <span id="wdUpdated"></span> <button class="btn" onclick="widthLoad(true)" style="padding:5px 16px;font-size:12px">手动刷新</button>
+    <button class="btn" onclick="exportWidth()" style="padding:5px 16px;font-size:12px;background:#1f6feb">📥 导出复盘数据（发给Kimi）</button><br>
+    <span id="wdStore" style="color:#3fb950"></span><br>
     数据来源：东方财富全市场个股行情实时计算（沪深A股，盘中实时）· 本面板仅供参考，不构成投资建议
   </div>
 </div>
@@ -1078,41 +1078,14 @@ async function loadSB(){
       yAxis:{type:"value",name:"2012年=1",nameTextStyle:{color:"#8b949e"},axisLabel:{color:"#8b949e"},splitLine:{lineStyle:{color:"#21262d"}}},
       series:[
         {name:"沪深300全收益",type:"line",data:sAP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#ff7b72"},itemStyle:{color:"#ff7b72"},
-         markPoint:{data:marks,symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
+         markPoint:{data:marks.concat([{coord:[li, sA[li]],symbol:"circle",symbolSize:9,itemStyle:{color:"#e3b341"},
+           label:{show:true,position:"left",distance:10,color:"#e3b341",fontSize:13,fontWeight:700,
+             formatter:est?("股债比 ≈"+est.ratio.toFixed(3)+"（盘中估算）"):("股债比 "+lastR.toFixed(3)+"（"+lastD.slice(5)+"净值）")}}]),
+           symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
         {name:"二级债基",type:"line",data:sBP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#58a6ff"},itemStyle:{color:"#58a6ff"}}
       ]
     });
-    /* 股债比小图：绿区=历史大底区(≤0.85)，红虚线=过热区(≥1.25) */
-    const ratioEl = $("sbRatioChart");
-    let ch2 = null;
-    if(ratioEl){
-      /* 盘中估算：黄线末端接一段黄色虚线到今天估算值；末尾只保留一个黄点显示最新数值，无需悬停 */
-      const estData = Array(datesP.length).fill(null);
-      if(est){ estData[li] = +lastR.toFixed(3); estData[li+12] = est.ratio; }
-      ch2 = echarts.init(ratioEl);
-      ch2.setOption({
-        backgroundColor:"transparent",
-        grid:{left:45,right:15,top:22,bottom:18},
-        tooltip:{show:false}, /* 不需要鼠标悬停，最新数值直接印在黄点上 */
-        xAxis:{type:"category",data:datesP,boundaryGap:false,axisLabel:{color:"#8b949e",fontSize:10,showMaxLabel:true},axisLine:{lineStyle:{color:"#30363d"}}},
-        yAxis:{type:"value",min:0.6,max:1.5,name:"股债比",nameTextStyle:{color:"#8b949e",fontSize:10},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
-        series:[{name:"股债比",type:"line",data:sRP.map(v=>v==null?null:+v.toFixed(3)),showSymbol:false,sampling:"lttb",
-          lineStyle:{width:1.4,color:"#e3b341"},itemStyle:{color:"#e3b341"},
-          markPoint:{data:est?[]:[{coord:[li, +lastR.toFixed(3)]}],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
-            label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:"最新 "+lastR.toFixed(3)+"（"+lastD.slice(5)+"净值）"}},
-          markArea:{itemStyle:{color:"rgba(63,185,80,0.12)"},
-            data:[[{yAxis:0.6,label:{show:true,position:"insideBottomLeft",color:"#3fb950",fontSize:11,formatter:"历史大底区 ≤0.85"}},{yAxis:0.85}]]},
-          markLine:{symbol:"none",data:[
-            {yAxis:0.85,lineStyle:{color:"#3fb950",type:"dashed"},label:{show:false}},
-            {yAxis:1.25,lineStyle:{color:"#f85149",type:"dashed"},label:{show:true,position:"insideEndTop",color:"#f85149",fontSize:10,formatter:"过热区 ≥1.25"}}
-          ]}},
-          {name:"今日盘中估算",type:"line",data:estData,showSymbol:false,lineStyle:{width:1.6,type:"dashed",color:"#e3b341"},itemStyle:{color:"#e3b341"},z:3,
-           markPoint:{data:est?[{coord:[li+12, est.ratio]}]:[],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
-             label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:est?("最新 ≈"+est.ratio.toFixed(3)+"（盘中估算）"):""}}}
-        ]
-      });
-    }
-    window.addEventListener("resize", ()=>{ ch.resize(); if(ch2) ch2.resize(); });
+    window.addEventListener("resize", ()=>{ ch.resize(); });
   }catch(e){
     chipEl.innerHTML = `<span style="color:#8b949e">股债数据暂时获取失败（不影响其他功能，点"刷新数据"重试）</span>`;
   }
@@ -1950,6 +1923,47 @@ let FLOW_CODES = {};
 /* ======== 市场宽度：全A涨跌家数×成交额 → 阿姆斯指标(TRIN) · 量价背离诊断 ======== */
 /* 判据（按你给的9/21案例）：家数倍数 R1 ÷ 成交额倍数 R2 = TRIN。
    R1大但TRIN>1 → 上涨家数虚胖、成交额没跟上 → 权重放量出货、小票补涨 → 宽度随时崩塌 */
+/* 取数双通道：fetch被浏览器/网络拦（你那边报的Failed to fetch）就自动换script标签通道，绕开跨域限制 */
+function wdJsonp(url){
+  return new Promise((resolve,reject)=>{
+    const cb = "wdCb" + Math.random().toString(36).slice(2);
+    const s = document.createElement("script");
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 12000);
+    function cleanup(){ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } s.remove(); }
+    window[cb] = j => { clearTimeout(timer); cleanup(); resolve(j); };
+    s.onerror = ()=>{ clearTimeout(timer); cleanup(); reject(new Error("script error")); };
+    s.src = url + "&cb=" + cb;
+    document.head.appendChild(s);
+  });
+}
+function wdGet(url){ return flowJson(url).catch(()=>wdJsonp(url)); }
+/* 存档写入：存不下（浏览器存储满）就自动砍掉最旧的一半再试，保证今天的数据一定存得下 */
+function wdSave(h){
+  if(safeSet(WD_KEY, JSON.stringify(h))) return;
+  const ks = Object.keys(h).sort();
+  ks.slice(0, Math.ceil(ks.length/2)).forEach(k=>delete h[k]);
+  safeSet(WD_KEY, JSON.stringify(h));
+}
+function storageKB(){ let t=0; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); t+=(k.length+(localStorage.getItem(k)||"").length)*2/1024; } }catch(e){} return t; }
+/* 导出复盘数据：攒2-3周/2-3个月后发给Kimi，逐条核对哪天的诊断对、哪天错 */
+function downloadTxt(fname, txt){
+  const blob = new Blob(["\ufeff"+txt], {type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+function exportWidth(){
+  const h = wdRead(), days = Object.keys(h).sort();
+  let txt = "基金监控面板 · 市场宽度复盘数据（发给Kimi复盘用）\n导出时间: "+new Date().toLocaleString()+"\n";
+  txt += "每天一档：日期 | 涨/跌/平盘 | 涨停/跌停 | 上涨成交额/下跌成交额(亿) | 红盘率% | TRIN | 当天诊断\n\n";
+  days.forEach(d=>{ const r=h[d];
+    txt += d+" | "+r.adv+"/"+r.dec+"/"+r.flat+" | 涨停"+r.up+"/跌停"+r.dn+" | "+r.aA+"/"+r.dA+"亿 | 红盘率"+r.bp+"% | TRIN "+r.trin+" | "+(r.v||"")+"\n"; });
+  if(WD_SNAP) txt += "\n最新完整快照: "+JSON.stringify(WD_SNAP)+"\n";
+  if(!days.length) txt += "（还没有存档，先打开一次市场宽度页攒数据）\n";
+  downloadTxt("市场宽度复盘-"+bjDateStr(bjNow())+".txt", txt);
+}
+
 const WD_KEY = "fund_breadth_v1";
 let WD_LOADING = false, WD_SNAP = null;
 function wdRead(){ try{ return JSON.parse(localStorage.getItem(WD_KEY)||"{}"); }catch(e){ return {}; } }
@@ -1962,7 +1976,7 @@ async function widthLoad(force){
   try{
     const FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"; /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所） */
     const FIELDS = "f12,f3,f6,f124";
-    const first = await flowJson(`${FLOW_BASE}/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+    const first = await wdGet(`${FLOW_BASE}/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
     const total = (first.data && first.data.total) || 0;
     const rows0 = (first.data && first.data.diff) || [];
     if(!total || !rows0.length) throw new Error("接口无数据");
@@ -1974,7 +1988,7 @@ async function widthLoad(force){
       while(pn <= pages){
         const cur = pn++;
         try{
-          const j = await flowJson(`${FLOW_BASE}/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+          const j = await wdGet(`${FLOW_BASE}/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
           ((j.data && j.data.diff) || []).forEach(r=>rows.push(r));
         }catch(e){}
       }
@@ -2001,11 +2015,7 @@ async function widthLoad(force){
       r1:+r1.toFixed(2), r2:+r2.toFixed(2), trin:+trin.toFixed(2), breadth:+breadth.toFixed(1),
       decAmtPct:+decAmtPct.toFixed(1), ts, _at:Date.now() };
     WD_SNAP = snap;
-    /* 每天一档自动存档（当天反复打开会覆盖，留下当天最后一次） */
-    try{ const h = wdRead(); h[d] = {adv,dec,flat,up:limitUp,dn:limitDown,aA:+snap.advAmt.toFixed(0),dA:+snap.decAmt.toFixed(0),trin:snap.trin,bp:snap.breadth};
-      const ks = Object.keys(h).sort(); while(ks.length>250) delete h[ks.shift()];
-      safeSet(WD_KEY, JSON.stringify(h)); }catch(e){}
-    wdRender(snap);
+    wdRender(snap); /* 存档在渲染里做：连同当天的诊断结论一起存，方便以后复盘哪天判对哪天判错 */
   }catch(e){
     $("wdBadge").textContent = "获取失败";
     $("wdRatio").innerHTML = `<span style="color:#f85149">全市场数据获取失败（${e.message||e}），点右下角「手动刷新」重试</span>`;
@@ -2058,6 +2068,15 @@ function wdRender(s){
      <div style="margin-top:10px;padding:10px 12px;background:#161b22;border-left:3px solid ${color};border-radius:6px;line-height:1.9">${verdict}</div>`;
   $("wdDate").textContent = `${s.d} ${s.ts?fmtT(s.ts):""} · 沪深A股 ${s.adv+s.dec+s.flat} 只在交易（停牌未计入）`;
   $("wdUpdated").textContent = "更新于 " + new Date().toLocaleString("zh-CN",{hour12:false});
+  /* —— 每天一档自动存档（含当天诊断结论，供以后复盘）；写不进就砍最旧的一半 —— */
+  try{
+    const ah = wdRead();
+    ah[s.d] = {adv:s.adv,dec:s.dec,flat:s.flat,up:s.limitUp,dn:s.limitDown,aA:+s.advAmt.toFixed(0),dA:+s.decAmt.toFixed(0),trin:s.trin,bp:s.breadth,v:badge};
+    const ks = Object.keys(ah).sort(); while(ks.length>250) delete ah[ks.shift()];
+    wdSave(ah);
+  }catch(e){}
+  const kb = storageKB();
+  $("wdStore").textContent = `浏览器存档占用 ${kb.toFixed(0)}KB / 约5120KB · 每天只占约0.1KB，放心攒 · 真存满时会自动砍掉最旧的一半，今天的数据一定存得下`;
   /* —— 资金去向条 —— */
   const tot = s.advAmt + s.decAmt, aPct = s.advAmt/tot*100;
   $("wdMoney").innerHTML =
