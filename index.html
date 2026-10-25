@@ -212,6 +212,8 @@
     <h3>⚖️ 股债性价比 · 沪深300全收益 vs 二级债基<small>红线=股 蓝线=债 · 红线跌破蓝线≠见底 · 跌到蓝线的75~85%=跌透=历史大底（2013/2016/2018/2022/2024五次全灵验，绿📍标记） · 下方小图=股债比，≤0.85进大底区 · 数据:510300累计净值≈沪深300全收益 + 110008易方达稳健收益(老牌二级债基近似债基指数) · 2012年至今 · 仅参考不构成建议</small></h3>
     <div id="sbChips" style="margin-bottom:6px"><span style="color:#8b949e">加载中…</span></div>
     <div id="sbChart" style="height:300px"></div>
+    <div style="font-size:12px;color:#8b949e;margin:6px 0 2px">📏 股债比走势（红线÷蓝线）——绿色区域=历史大底区，黄线跌进绿区=十年一遇的机会</div>
+    <div id="sbRatioChart" style="height:230px"></div>
   </div>
 
   <div class="panel" style="margin-bottom:14px">
@@ -1079,13 +1081,43 @@ async function loadSB(){
       series:[
         {name:"沪深300全收益",type:"line",data:sAP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#ff7b72"},itemStyle:{color:"#ff7b72"},
          markPoint:{data:marks.concat([{coord:[li, sA[li]],symbol:"circle",symbolSize:9,itemStyle:{color:"#e3b341"},
-           label:{show:true,position:"left",distance:10,color:"#e3b341",fontSize:13,fontWeight:700,
-             formatter:est?("股债比 ≈"+est.ratio.toFixed(3)+"（盘中估算）"):("股债比 "+lastR.toFixed(3)+"（"+lastD.slice(5)+"净值）")}}]),
+           label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,
+             formatter:est?est.ratio.toFixed(2):lastR.toFixed(2)}}]),
            symbol:"pin",symbolSize:32,itemStyle:{color:"#3fb950"},label:{show:false}}},
         {name:"二级债基",type:"line",data:sBP,showSymbol:false,sampling:"lttb",lineStyle:{width:1.6,color:"#58a6ff"},itemStyle:{color:"#58a6ff"}}
       ]
     });
-    window.addEventListener("resize", ()=>{ ch.resize(); });
+    /* 股债比小图：绿区=历史大底区(≤0.85)，红虚线=过热区(≥1.25) */
+    const ratioEl = $("sbRatioChart");
+    let ch2 = null;
+    if(ratioEl){
+      /* 盘中估算：黄线末端接一段黄色虚线到今天估算值；末尾只保留一个黄点显示最新数值，无需悬停 */
+      const estData = Array(datesP.length).fill(null);
+      if(est){ estData[li] = +lastR.toFixed(3); estData[li+12] = est.ratio; }
+      ch2 = echarts.init(ratioEl);
+      ch2.setOption({
+        backgroundColor:"transparent",
+        grid:{left:45,right:15,top:22,bottom:18},
+        tooltip:{show:false}, /* 不需要鼠标悬停，最新数值直接印在黄点上 */
+        xAxis:{type:"category",data:datesP,boundaryGap:false,axisLabel:{color:"#8b949e",fontSize:10,showMaxLabel:true},axisLine:{lineStyle:{color:"#30363d"}}},
+        yAxis:{type:"value",min:0.6,max:1.5,name:"股债比",nameTextStyle:{color:"#8b949e",fontSize:10},axisLabel:{color:"#8b949e",fontSize:10},splitLine:{lineStyle:{color:"#21262d"}}},
+        series:[{name:"股债比",type:"line",data:sRP.map(v=>v==null?null:+v.toFixed(3)),showSymbol:false,sampling:"lttb",
+          lineStyle:{width:1.4,color:"#e3b341"},itemStyle:{color:"#e3b341"},
+          markPoint:{data:est?[]:[{coord:[li, +lastR.toFixed(3)]}],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
+            label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:"最新 "+lastR.toFixed(3)+"（"+lastD.slice(5)+"净值）"}},
+          markArea:{itemStyle:{color:"rgba(63,185,80,0.12)"},
+            data:[[{yAxis:0.6,label:{show:true,position:"insideBottomLeft",color:"#3fb950",fontSize:11,formatter:"历史大底区 ≤0.85"}},{yAxis:0.85}]]},
+          markLine:{symbol:"none",data:[
+            {yAxis:0.85,lineStyle:{color:"#3fb950",type:"dashed"},label:{show:false}},
+            {yAxis:1.25,lineStyle:{color:"#f85149",type:"dashed"},label:{show:true,position:"insideEndTop",color:"#f85149",fontSize:10,formatter:"过热区 ≥1.25"}}
+          ]}},
+          {name:"今日盘中估算",type:"line",data:estData,showSymbol:false,lineStyle:{width:1.6,type:"dashed",color:"#e3b341"},itemStyle:{color:"#e3b341"},z:3,
+           markPoint:{data:est?[{coord:[li+12, est.ratio]}]:[],symbol:"circle",symbolSize:8,itemStyle:{color:"#e3b341"},
+             label:{show:true,position:"left",distance:8,color:"#e3b341",fontSize:13,fontWeight:700,formatter:est?("最新 ≈"+est.ratio.toFixed(3)+"（盘中估算）"):""}}}
+        ]
+      });
+    }
+    window.addEventListener("resize", ()=>{ ch.resize(); if(ch2) ch2.resize(); });
   }catch(e){
     chipEl.innerHTML = `<span style="color:#8b949e">股债数据暂时获取失败（不影响其他功能，点"刷新数据"重试）</span>`;
   }
@@ -1936,7 +1968,16 @@ function wdJsonp(url){
     document.head.appendChild(s);
   });
 }
-function wdGet(url){ return flowJson(url).catch(()=>wdJsonp(url)); }
+/* 取数通道自动探测：你那边"Failed to fetch/script error"说明某个通道被浏览器安全拦截或网络设备吞了。
+   现在按顺序试 5个东财节点×2种方式（fetch→script标签），哪个通用就一直用哪个 */
+const WD_HOSTS = ["https://push2delay.eastmoney.com","https://push2.eastmoney.com","https://1.push2.eastmoney.com","https://33.push2.eastmoney.com","https://1.push2delay.eastmoney.com"];
+let WD_CH = null;
+async function wdChan(path){
+  if(WD_CH) return WD_CH(path);
+  for(const h of WD_HOSTS){ try{ const j = await flowJson(h+path); if(j && j.data){ WD_CH = u=>flowJson(h+u); return j; } }catch(e){} }
+  for(const h of WD_HOSTS){ try{ const j = await wdJsonp(h+path); if(j && j.data){ WD_CH = u=>wdJsonp(h+u); return j; } }catch(e){} }
+  throw new Error("10条取数通道全被拦截——试试：关掉浏览器「安全网址拦截/广告拦截」插件，或换Edge/Chrome打开");
+}
 /* 存档写入：存不下（浏览器存储满）就自动砍掉最旧的一半再试，保证今天的数据一定存得下 */
 function wdSave(h){
   if(safeSet(WD_KEY, JSON.stringify(h))) return;
@@ -1974,9 +2015,9 @@ async function widthLoad(force){
   WD_LOADING = true;
   $("wdBadge").textContent = "统计中…";
   try{
-    const FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"; /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所） */
+    const FS = encodeURIComponent("m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"); /* 沪深A股：深主板+创业板+沪主板+科创板（不含北交所）。参数全编码，防止被安全软件吞请求 */
     const FIELDS = "f12,f3,f6,f124";
-    const first = await wdGet(`${FLOW_BASE}/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+    const first = await wdChan(`/api/qt/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
     const total = (first.data && first.data.total) || 0;
     const rows0 = (first.data && first.data.diff) || [];
     if(!total || !rows0.length) throw new Error("接口无数据");
@@ -1987,10 +2028,11 @@ async function widthLoad(force){
     await Promise.all(Array.from({length:4}, async ()=>{
       while(pn <= pages){
         const cur = pn++;
-        try{
-          const j = await wdGet(`${FLOW_BASE}/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
-          ((j.data && j.data.diff) || []).forEach(r=>rows.push(r));
-        }catch(e){}
+        const pull = ()=>wdChan(`/api/qt/clist/get?pn=${cur}&pz=${pzReal}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${FS}&fields=${FIELDS}`);
+        try{ const j = await pull(); ((j.data && j.data.diff) || []).forEach(r=>rows.push(r)); }
+        catch(e){ /* 失败自动重试一次，防止少一页数据导致家数算错 */
+          try{ const j = await pull(); ((j.data && j.data.diff) || []).forEach(r=>rows.push(r)); }catch(e2){}
+        }
       }
     }));
     let adv=0, dec=0, flat=0, advAmt=0, decAmt=0, limitUp=0, limitDown=0, ts=0;
